@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="utf-8"><title>上传金样</title></head>
+  <body>
+    <main>
+      <h1>单集上传</h1>
+      <label for="audio">选择音频文件</label>
+      <input id="audio" name="audio" type="file" accept="audio/*">
+      <label for="hidden-audio"><span>点击上传音频</span></label>
+      <input id="hidden-audio" name="hidden-audio" type="file" accept="audio/*" hidden>
+      <label for="title">标题</label>
+      <input id="title" name="title" placeholder="输入单集标题">
+      <div aria-label="Show Notes" contenteditable="true" role="textbox"></div>
+      <button type="submit">创建</button>
+      <p id="result" role="status">尚未选择文件</p>
+      <p id="hidden-result" role="status">尚未通过语义入口选择文件</p>
+      <script>
+        document.querySelector('#audio').addEventListener('change', (event) => {
+          document.querySelector('#result').textContent = event.target.files[0]?.name || '尚未选择文件';
+        });
+        document.querySelector('#hidden-audio').addEventListener('change', (event) => {
+          document.querySelector('#hidden-result').textContent = event.target.files[0]?.name || '尚未通过语义入口选择文件';
+        });
+      </script>
+    </main>
+  </body>
+</html>

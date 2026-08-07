@@ -1,0 +1,107 @@
+# Agent Browser Local
+
+供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
+
+当前版本：P0 内核 `0.2.0`。
+
+平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留未来适配定义，按用户当前冻结指令默认不启用。
+
+## 已实现
+
+- Electron/Chromium 独立窗口与独立 Profile，不读取日常 Chrome 数据。
+- Snapshot-first：通过 Chromium Accessibility/CDP 生成短期 `ref`，不向 Agent 暴露 CSS/XPath；评论、统计和记录型内容不进入 Snapshot。
+- `ref` 在每次动作、刷新或导航后失效。
+- 无名控件允许“当前截图动态定位”；截图 ID 60 秒过期，页面变化立即失效，禁止固定坐标。
+- 文件上传通过 Snapshot 找到原生文件输入；隐藏输入则从语义上传入口拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
+- 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
+- principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
+- 创建、发布、提交、删除、支付、登录、验证码、协议确认、Suno Create、Get Stems/MIDI 等动作在发出前由 daemon 拦截并 handoff。
+- 单队列、人类节奏执行和 JSONL 审计。
+- MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
+- NovaGe/NovaDe 共用 `adapters/python/agent_browser_client.py`；principal 固定为本机 token 映射，服务地址只能是 loopback，上传文件只能来自各自 workspace。
+
+## 明确不提供
+
+- 任意 JavaScript / DOM evaluate。
+- CSS、XPath 或 test-id 选择器接口。
+- HTML/正文导出、网络拦截、翻页遍历、批量抓取。
+- 读取型后台路径（评论、分析、统计、订阅、收益等）的导航与截图。
+- P0 特权确认接口。最终动作只能由用户在浏览器窗口中亲自完成。
+
+## 启动
+
+```bash
+cd "/Users/evanguo/Documents/New project2/agent-chrome-lite"
+npm start
+```
+
+首次启动会创建：
+
+- 配置：`~/.agent-browser-local/config.json`
+- Agent token：`~/.agent-browser-local/tokens.env`（仅当前用户可读）
+- 独立 Profile：`~/.agent-browser-local/profile`
+- 审计：`~/.agent-browser-local/audit/events.jsonl`
+
+首次生成的 Codex、Claude、NovaGe、NovaDe token 写入权限为 `0600` 的 `tokens.env`；daemon 配置本身仅保存 SHA-256。
+
+## HTTP 示例
+
+```bash
+export ABL_TOKEN='首次启动显示的 token'
+
+curl -H "Authorization: Bearer $ABL_TOKEN" \
+  http://127.0.0.1:3767/v1/session
+
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"url":"https://podcaster.xiaoyuzhoufm.com"}' \
+  http://127.0.0.1:3767/v1/navigate
+
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{}' \
+  http://127.0.0.1:3767/v1/snapshot
+```
+
+WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: Bearer ...` 请求头里。消息格式：
+
+```json
+{"id":"1","method":"browser.snapshot","params":{}}
+```
+
+## MCP
+
+Claude Code 与 Codex 使用同一个 stdio 入口：
+
+```bash
+ABL_TOKEN='对应 principal 的 token' \
+node "/Users/evanguo/Documents/New project2/agent-chrome-lite/mcp/server.mjs"
+```
+
+工具只有：status、navigate、snapshot、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。没有发布或确认工具。
+
+不把 token 写进 MCP 配置的固定 principal 启动方式见 [config/MCP-SETUP.md](config/MCP-SETUP.md)。
+
+## 检查
+
+```bash
+npm run check
+npm test
+npm run test:upload
+npm run test:protocols
+npm run test:python
+```
+
+`test:upload` 是 P0 第一硬门：在真正的独立 Electron/Chromium 中用 Snapshot ref 找到文件输入，并通过 CDP 绑定测试文件。
+
+`test:protocols` 在随机 loopback 端口启动隔离 daemon，验证真实 HTTP、WebSocket 和 MCP 链，不连接正在登录的平台浏览器。`test:python` 验证 NovaGe/NovaDe 的固定 principal HTTP 适配器。
+
+已有独立 Profile 要新增平台入口时，由本机维护者显式执行（Agent 协议没有修改权限表的工具）：
+
+```bash
+npm run platforms -- --list
+npm run platforms -- ximalaya
+npm run platforms -- --disable suno
+```

@@ -1,0 +1,214 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  isContributionHint,
+  isReadOnlyControl,
+  SnapshotStore,
+} from "../src/browser/snapshot.mjs";
+
+function fakeCdp(nodes, metadata) {
+  return {
+    async send(method, params = {}) {
+      if (method === "Accessibility.getFullAXTree") return { nodes };
+      if (method === "DOM.resolveNode") {
+        return { object: { objectId: String(params.backendNodeId) } };
+      }
+      if (method === "Runtime.callFunctionOn") {
+        return { result: { value: metadata[params.objectId] || {} } };
+      }
+      throw new Error(`Unexpected CDP method: ${method}`);
+    },
+  };
+}
+
+test("dashboard snapshot suppresses readback controls and static page data", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        { nodeId: "1", backendDOMNodeId: 1, role: { value: "button" }, name: { value: "内容管理" } },
+        { nodeId: "2", backendDOMNodeId: 2, role: { value: "link" }, name: { value: "某用户 2026.08.05 一条评论" } },
+        { nodeId: "3", role: { value: "StaticText" }, name: { value: "不应返回的统计数据" } },
+      ],
+      {
+        1: { tag: "button", visible: true },
+        2: { tag: "a", href: "https://example.test/podcast/one/interaction/comment", visible: true },
+      },
+    ),
+    { title: "后台", url: "https://example.test/podcast/one" },
+  );
+
+  assert.deepEqual(result.controls, []);
+  assert.deepEqual(result.hints, []);
+});
+
+test("ximalaya upload survives while management navigation is suppressed", () => {
+  const pageUrl = "https://studio.ximalaya.com/upload";
+  assert.equal(
+    isReadOnlyControl({ role: "upload", name: "上传" }, pageUrl),
+    false,
+  );
+  for (const name of [
+    "首页",
+    "消息",
+    "在线客服",
+    "帮助中心",
+    "个人信息",
+    "内容管理",
+    "互动管理",
+    "数据中心",
+    "直播管理",
+    "视频管理",
+    "收入与服务",
+    "带货中心",
+    "问题咨询",
+    "我的作品",
+    "创作收益",
+  ]) {
+    assert.equal(
+      isReadOnlyControl({ role: "button", name }, pageUrl),
+      true,
+      name,
+    );
+  }
+});
+
+test("video-channel hints expose only contribution context", async () => {
+  for (const text of [
+    "申政",
+    "wideNavigation",
+    "视频号 · 助手",
+    "首页",
+    "内容管理",
+    "互动管理",
+    "收入与服务",
+    "数据中心",
+    "通知中心",
+    "草稿箱",
+    "北京市",
+    "© 1998-2026 Tencent Inc. All Rights Reserved.",
+  ]) {
+    assert.equal(isContributionHint(text), false, text);
+  }
+  for (const text of [
+    "短标题",
+    "视频描述",
+    "添加描述",
+    "声明原创",
+    "选择合集",
+    "定时发表",
+    "保存草稿",
+    "手机预览",
+    "发表",
+    "上传时长8小时内，大小不超过20GB",
+  ]) {
+    assert.equal(isContributionHint(text), true, text);
+  }
+
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "title",
+          backendDOMNodeId: 20,
+          role: { value: "textbox" },
+          name: { value: "填写短标题有机会获得更多流量" },
+        },
+        { nodeId: "account", role: { value: "StaticText" }, name: { value: "申政" } },
+        { nodeId: "manage", role: { value: "StaticText" }, name: { value: "内容管理" } },
+        { nodeId: "description", role: { value: "StaticText" }, name: { value: "视频描述" } },
+        { nodeId: "publish", role: { value: "StaticText" }, name: { value: "发表" } },
+      ],
+      {
+        20: { tag: "input", type: "text", visible: true },
+      },
+    ),
+    {
+      title: "视频号发表",
+      url: "https://channels.weixin.qq.com/platform/post/create",
+    },
+  );
+
+  assert.deepEqual(result.hints, [
+    { role: "StaticText", text: "视频描述" },
+    { role: "StaticText", text: "发表" },
+  ]);
+});
+
+test("stable snapshot retries a temporarily empty client-rendered page", async () => {
+  const store = new SnapshotStore();
+  const waits = [];
+  let captures = 0;
+  store.capture = async () => {
+    captures += 1;
+    return captures === 1
+      ? { snapshotId: "early", controls: [], hints: [] }
+      : {
+          snapshotId: "ready",
+          controls: [{ ref: "ready:1", role: "upload", name: "上传" }],
+          hints: [],
+        };
+  };
+
+  const result = await store.captureStable(null, null, {
+    attempts: 3,
+    intervalMs: 400,
+    wait: async (ms) => waits.push(ms),
+  });
+
+  assert.equal(result.snapshotId, "ready");
+  assert.equal(captures, 2);
+  assert.deepEqual(waits, [400]);
+});
+
+test("contribution form exposes semantic editor and hidden native file input", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "editor",
+          backendDOMNodeId: 10,
+          role: { value: "textbox" },
+          name: { value: "" },
+          childIds: ["editor-hint"],
+        },
+        { nodeId: "editor-hint", role: { value: "StaticText" }, name: { value: "在这里编辑 Show Notes" } },
+        { nodeId: "file", backendDOMNodeId: 11, ignored: true },
+        { nodeId: "upload-text", backendDOMNodeId: 12, role: { value: "StaticText" }, name: { value: "点击上传封面" } },
+        { nodeId: "heading", role: { value: "heading" }, name: { value: "创建单集" } },
+      ],
+      {
+        10: {
+          tag: "div",
+          contentEditable: true,
+          formAction: "https://example.test/create",
+          value: "第一段\n\n第二段\nhttps://example.test",
+          visible: true,
+        },
+        11: {
+          tag: "input",
+          type: "file",
+          ariaLabel: "上传音频",
+          visible: false,
+        },
+        12: { tag: "span", visible: true },
+      },
+    ),
+    { title: "创建单集", url: "https://example.test/create" },
+  );
+
+  assert.equal(result.controls[0].name, "在这里编辑 Show Notes");
+  assert.equal(result.controls[0].value, "第一段\n\n第二段\nhttps://example.test");
+  assert.equal(result.controls[1].role, "upload");
+  assert.equal(result.controls[1].name, "点击上传封面");
+  assert.equal(result.controls[2].role, "file");
+  assert.equal(result.controls[2].name, "上传音频");
+  assert.deepEqual(result.hints, [
+    { role: "StaticText", text: "在这里编辑 Show Notes" },
+    { role: "StaticText", text: "点击上传封面" },
+    { role: "heading", text: "创建单集" },
+  ]);
+});

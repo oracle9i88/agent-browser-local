@@ -1,0 +1,16 @@
+import { contextBridge, ipcRenderer } from "electron";
+
+contextBridge.exposeInMainWorld("agentBrowser", {
+  status: () => ipcRenderer.invoke("browser:status"),
+  navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
+  back: () => ipcRenderer.invoke("browser:back"),
+  forward: () => ipcRenderer.invoke("browser:forward"),
+  reload: () => ipcRenderer.invoke("browser:reload"),
+  clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
+  onState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on("browser:state", listener);
+    return () => ipcRenderer.removeListener("browser:state", listener);
+  },
+});
+
