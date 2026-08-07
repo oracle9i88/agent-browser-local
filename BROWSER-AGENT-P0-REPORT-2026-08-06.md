@@ -6,6 +6,15 @@
 
 ## 已完成
 
+### 0.3.0：Kitesurf 架构借鉴（不更换 Chromium）
+
+- 保留本地 Electron/Chromium、独立持久 Profile 和真实窗口；不采用 Kitesurf 作为账号平台地基，因为投稿流程依赖持久登录、文件上传与人工接管。
+- 所有受控 WebContents 统一登记到 session 级网络出口策略。平台自身及 CDN 的远程资源可以加载；页面对 loopback、私网、本地域名、`file:`、危险协议和 URL 内嵌凭证的请求会在发出前取消。
+- 主框架跳出投稿 allowlist 时仍允许用户完成外部登录，但在网络请求阶段立即 handoff，Agent 不得继续动作。
+- renderer 崩溃、页面无响应、主框架加载失败和 CDP 命令超时均进入显式 `pageHealth=faulted`；Snapshot、截图和动作 fail closed，daemon 与登录 Profile 保留，不自动重建会话。
+- 原 Electron 上传金样升级为 Chromium 合同测试：同一临时 Profile 本地 fixture 同时验证语义字段、Show Notes 多段落/空行/链接读回、只投稿隐私过滤、刷新后新 Snapshot/ref、原生与语义上传，以及重新进入前后的渲染哈希一致。
+- 新金样发现并修复了混合根文本与块级节点的富文本序列化缺陷；此前真实小宇宙编辑器能通过，但最小 Chromium contenteditable 会漏掉第一段，现已由金样冻结。
+
 ### 独立浏览器与控制本体
 
 - Electron/Chromium 独立窗口，profile 位于 `~/.agent-browser-local/profile`，不读取日常 Chrome。
@@ -108,7 +117,7 @@ https://example.com/g0-check
 3. 公众号、小红书、抖音、快手分别做一次真实发布面验收。视频号已确认 UA 修复后可进入发表页；隐私过滤补丁已离线通过，待用户未来明确允许时再做一次不登录、不上传的最终验收。
 4. Suno/MIDI 当前冻结。适配定义仍保留，但已从默认启用集合和本机 allowlist 移除；实测 `/create` 在 daemon 发出浏览器请求前返回 `outside_contribution_scope`。用户重新明确授权前不执行任何页面或下载动作。
 5. P1 才考虑特权确认 UI、应用打包签名、自动启动、平台策略管理界面等体验项。
-6. 当前项目与三份报告尚未纳入 Git，需在最终回归后只提交本项目相关文件存档。
+6. 项目与三份报告已有独立 Git 基线提交 `d9f120b`；后续只提交浏览器项目及对应决策/报告，不纳入工作区其他文件。
 
 ## 启动与接入
 

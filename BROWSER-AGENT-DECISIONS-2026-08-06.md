@@ -27,6 +27,9 @@
 9. 受限动作执行器必须按人的操作速度节流；单账号、低频、串行，不跑机器极限速度。
 10. 禁止把 CSS、XPath 或固定坐标作为定位策略；允许 CDP `setFileInputFiles` 等作为已经通过语义/ref 找到目标后的机制调用。
 11. 每个平台的差异放在服务端平台策略和风险词配置中，不把平台选择器或流程写进浏览器内核。
+12. Kitesurf 不替换本地 Chromium：本项目依赖持久登录、真实窗口、文件上传和人工接管；Kitesurf 仅适合短命、无状态、无账号的云端任务。
+13. 借鉴 Kitesurf 的隔离原则：页面一律视为不可信输入；受控 WebContents 的网络统一经过 egress policy；renderer 或 CDP 故障不得拖垮 daemon，也不得自动重建登录会话。
+14. Chromium 本身作为生产地基和回归金样；每次内核修改必须在临时 Profile、本地 fixture 中比较重新进入前后的 Snapshot 语义和确定性渲染，不碰真实账号。
 
 ## weband 宪法
 
@@ -87,6 +90,9 @@
 - NovaGe/NovaDe 的正式 `agent.py` 只保留薄工具定义；共用 Python HTTP 客户端放在浏览器项目 `adapters/python/`，固定 principal、loopback 和 workspace 上传边界均由代码执行。
 - 抖音、小红书、快手已将旧的 origin 根路径收窄为各自官方投稿路径；本机迁移会删除同 origin 的旧根路径后写入精确路径，不能只追加造成假收紧。
 - 微信公众号的图文编辑器与历史列表同属 `/cgi-bin/appmsg`，因此权限不能只看 path；daemon 还要求 `action=edit` 和 `t=media/appmsg_edit(_v2)`，明确拒绝 `action=list_ex`。
+- 0.3.0 已增加单一网络出口策略：远程平台资源照常加载，但页面访问 loopback、私网、`file:`、危险协议或 URL 内嵌凭证会在 session 层取消；离开投稿范围的主框架导航在请求阶段即触发 handoff。
+- 0.3.0 已增加页面故障态：renderer 崩溃、无响应、主框架加载失败和 CDP 超时会使 Snapshot/截图/动作 fail closed，同时保留 daemon 与 Profile，等待用户本人恢复。
+- 本地 Chromium 金样已把原上传测试扩展为语义表单、Show Notes 多段落/空行/链接读回、刷新后重新发现、新 ref、隐私过滤、双上传机制和渲染哈希的一次性合同测试；测试使用临时 Profile 和本地 fixture。
 - 公众号、小红书、抖音、快手仍需分别完成一次发布面验收；它们共享通用内核，但不得因小宇宙通过而宣称已验证。
 
 ## 公众号发布 API 调研结论

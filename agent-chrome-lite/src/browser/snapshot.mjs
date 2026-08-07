@@ -306,22 +306,32 @@ export async function readNodeMetadata(cdp, backendNodeId) {
           if (node.tagName === "BR") return "\\n";
           return Array.from(node.childNodes || []).map(inlineText).join("");
         };
-        const containerTags = new Set([
-          "ARTICLE", "ASIDE", "DIV", "FIGURE", "MAIN", "NAV", "SECTION"
-        ]);
-        const collectBlocks = (node, isRoot = false) => {
-          const nestedBlocks = Array.from(node.children || []).filter((child) =>
-            blockTags.has(child.tagName)
-          );
-          if (
-            nestedBlocks.length &&
-            (isRoot || containerTags.has(node.tagName))
-          ) {
-            return nestedBlocks.flatMap((child) => collectBlocks(child, false));
+        const collectLines = (node) => {
+          const lines = [];
+          let inlineBuffer = "";
+          const flushInline = () => {
+            if (!inlineBuffer) return;
+            lines.push(inlineBuffer);
+            inlineBuffer = "";
+          };
+          for (const child of Array.from(node.childNodes || [])) {
+            if (child.nodeType === 1 && blockTags.has(child.tagName)) {
+              flushInline();
+              const childLines = collectLines(child);
+              lines.push(...(childLines.length ? childLines : [""]));
+              continue;
+            }
+            if (child.nodeType === 1 && child.tagName === "BR") {
+              lines.push(inlineBuffer);
+              inlineBuffer = "";
+              continue;
+            }
+            inlineBuffer += inlineText(child);
           }
-          return [inlineText(node).replace(/\\n+$/g, "")];
+          flushInline();
+          return lines;
         };
-        return collectBlocks(root, true).join("\\n");
+        return collectLines(root).join("\\n");
       };
       const editableText = this.isContentEditable ? serializeEditable(this) : undefined;
       const value = tag === "input" || tag === "textarea" || tag === "select"

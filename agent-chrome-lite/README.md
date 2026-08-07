@@ -2,13 +2,16 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：P0 内核 `0.2.0`。
+当前版本：P0 内核 `0.3.0`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留未来适配定义，按用户当前冻结指令默认不启用。
 
 ## 已实现
 
 - Electron/Chromium 独立窗口与独立 Profile，不读取日常 Chrome 数据。
+- 所有受控页面都按不可信输入处理：sandbox、权限全拒绝、`webSecurity`、安全弹窗和统一网络出口同时生效。
+- 受控页面不能探测 daemon、loopback、私网、`file:` 或带账号密码的 URL；外部登录页可以显示，但进入前即触发 handoff。
+- renderer 崩溃、页面无响应、主框架加载失败或 CDP 超时只会把当前页面标为故障并冻结自动化；daemon 与登录 Profile 保留，不自动重建或反复登录。
 - Snapshot-first：通过 Chromium Accessibility/CDP 生成短期 `ref`，不向 Agent 暴露 CSS/XPath；评论、统计和记录型内容不进入 Snapshot。
 - `ref` 在每次动作、刷新或导航后失效。
 - 无名控件允许“当前截图动态定位”；截图 ID 60 秒过期，页面变化立即失效，禁止固定坐标。
@@ -90,11 +93,12 @@ node "/Users/evanguo/Documents/New project2/agent-chrome-lite/mcp/server.mjs"
 npm run check
 npm test
 npm run test:upload
+npm run test:chromium-gold
 npm run test:protocols
 npm run test:python
 ```
 
-`test:upload` 是 P0 第一硬门：在真正的独立 Electron/Chromium 中用 Snapshot ref 找到文件输入，并通过 CDP 绑定测试文件。
+`test:upload` 与 `test:chromium-gold` 指向同一个真实 Chromium 金样：验证原生/语义上传、富文本多段落和链接保真、刷新后语义重新发现、旧 ref 失效、只投稿 Snapshot 隐私边界，以及同一 fixture 的确定性渲染。
 
 `test:protocols` 在随机 loopback 端口启动隔离 daemon，验证真实 HTTP、WebSocket 和 MCP 链，不连接正在登录的平台浏览器。`test:python` 验证 NovaGe/NovaDe 的固定 principal HTTP 适配器。
 

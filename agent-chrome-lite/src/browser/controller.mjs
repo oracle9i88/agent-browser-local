@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 import { CdpSession } from "./cdp-session.mjs";
+import {
+  isMainFrameLoadFailure,
+  PageHealthState,
+} from "./page-health.mjs";
 import { readNodeMetadata, SnapshotStore } from "./snapshot.mjs";
 import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
 
@@ -47,6 +51,15 @@ function normalizeUrl(input, { allowFileUrls = false } = {}) {
   return parsed.href;
 }
 
+function safeFaultUrl(value) {
+  try {
+    const url = new URL(value);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return "";
+  }
+}
+
 function pointFromQuads(quads) {
   const quad = quads?.[0];
   if (!Array.isArray(quad) || quad.length < 8) return null;
@@ -62,7 +75,12 @@ export class BrowserController extends EventEmitter {
     this.webContents = webContents;
     this.config = config;
     this.allowFileUrls = allowFileUrls;
-    this.cdp = new CdpSession(webContents);
+    this.pageHealth = new PageHealthState();
+    this.cdp = new CdpSession(webContents, {
+      onFault: (error) => {
+        this.failPage("cdp_command_timeout", error.detail || {});
+      },
+    });
     this.snapshotStore = new SnapshotStore({
       maxControls: config.security.maxSnapshotControls,
       maxHints: config.security.maxSnapshotHints,
@@ -91,6 +109,32 @@ export class BrowserController extends EventEmitter {
       this.invalidate();
     });
     webContents.on("page-title-updated", () => this.emitState());
+    webContents.on("render-process-gone", (_event, detail = {}) => {
+      this.failPage("renderer_gone", {
+        reason: detail.reason,
+        exitCode: detail.exitCode,
+      });
+    });
+    webContents.on("unresponsive", () => {
+      this.failPage("page_unresponsive");
+    });
+    webContents.on("responsive", () => {
+      this.recoverPage();
+    });
+    webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (!isMainFrameLoadFailure({ errorCode, isMainFrame })) return;
+        this.failPage("main_frame_load_failed", {
+          errorCode,
+          errorDescription,
+          url: safeFaultUrl(validatedURL),
+        });
+      },
+    );
+    webContents.on("did-finish-load", () => {
+      this.recoverPage();
+    });
   }
 
   async initialize() {
@@ -118,7 +162,38 @@ export class BrowserController extends EventEmitter {
       canGoBack: this.webContents.navigationHistory.canGoBack(),
       canGoForward: this.webContents.navigationHistory.canGoForward(),
       handoff: this.handoff,
+      pageHealth: this.pageHealth.snapshot(),
     };
+  }
+
+  assertPageAvailable() {
+    this.pageHealth.assertAvailable();
+  }
+
+  failPage(code, detail = {}) {
+    const health = this.pageHealth.fail(code, detail);
+    this.invalidate();
+    this.setHandoff(
+      "页面渲染发生故障，自动化已冻结；登录 Profile 保留，等待用户决定重新加载或重新导航。",
+      {
+        code: "page_unavailable",
+        fault: health.fault,
+      },
+    );
+    return health;
+  }
+
+  recoverPage() {
+    const changed = this.pageHealth.recover();
+    if (
+      changed &&
+      this.handoff?.detail?.code === "page_unavailable" &&
+      isContributionUrlAllowed(this.config, this.webContents.getURL())
+    ) {
+      this.clearHandoff();
+      return;
+    }
+    if (changed) this.emitState();
   }
 
   async navigate(url) {
@@ -174,6 +249,7 @@ export class BrowserController extends EventEmitter {
   }
 
   async snapshot() {
+    this.assertPageAvailable();
     return this.snapshotStore.captureStable(this.cdp, {
       title: this.webContents.getTitle(),
       url: this.webContents.getURL(),
@@ -181,10 +257,12 @@ export class BrowserController extends EventEmitter {
   }
 
   resolveRef(ref) {
+    this.assertPageAvailable();
     return this.snapshotStore.resolve(ref);
   }
 
   async screenshot() {
+    this.assertPageAvailable();
     const [{ data }, metrics] = await Promise.all([
       this.cdp.send("Page.captureScreenshot", {
         format: "png",
@@ -209,6 +287,7 @@ export class BrowserController extends EventEmitter {
   }
 
   async resolveVisualPoint({ screenshotId, x, y }) {
+    this.assertPageAvailable();
     const state = this.screenshotState;
     if (
       !state ||
@@ -341,16 +420,24 @@ export class BrowserController extends EventEmitter {
 
     for (const character of String(value)) {
       if (character === "\n") {
+        // A complete Enter event triggers the editor's native paragraph
+        // behavior; the virtual key fields are required by Chromium CDP.
         await this.cdp.send("Input.dispatchKeyEvent", {
           type: "keyDown",
           key: "Enter",
           code: "Enter",
+          text: "\r",
+          unmodifiedText: "\r",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
         });
         await delay(45 + Math.floor(Math.random() * 55));
         await this.cdp.send("Input.dispatchKeyEvent", {
           type: "keyUp",
           key: "Enter",
           code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
         });
         continue;
       }

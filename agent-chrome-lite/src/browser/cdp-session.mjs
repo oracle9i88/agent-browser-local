@@ -1,6 +1,11 @@
 export class CdpSession {
-  constructor(webContents) {
+  constructor(
+    webContents,
+    { commandTimeoutMs = 15_000, onFault = () => undefined } = {},
+  ) {
     this.webContents = webContents;
+    this.commandTimeoutMs = commandTimeoutMs;
+    this.onFault = onFault;
   }
 
   async attach() {
@@ -17,9 +22,25 @@ export class CdpSession {
     ]);
   }
 
-  async send(method, params = {}) {
+  async send(method, params = {}, { timeoutMs = this.commandTimeoutMs } = {}) {
     if (!this.webContents.debugger.isAttached()) await this.attach();
-    return this.webContents.debugger.sendCommand(method, params);
+    let timer;
+    try {
+      return await Promise.race([
+        this.webContents.debugger.sendCommand(method, params),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            const error = new Error(`Timed out running CDP command ${method}`);
+            error.code = "cdp_command_timeout";
+            error.detail = { method, timeoutMs };
+            this.onFault(error);
+            reject(error);
+          }, timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   waitFor(method, timeoutMs = 8000) {

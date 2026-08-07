@@ -1,5 +1,5 @@
 export const PRODUCT_NAME = "Agent Browser Local";
-export const VERSION = "0.2.0";
+export const VERSION = "0.3.0";
 
 export const CAPABILITIES = Object.freeze({
   STATUS: "browser.status",

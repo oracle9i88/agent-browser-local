@@ -1,9 +1,22 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head><meta charset="utf-8"><title>上传金样</title></head>
+  <head>
+    <meta charset="utf-8">
+    <title>Chromium 投稿金样</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; margin: 32px; }
+      main { display: grid; gap: 12px; max-width: 680px; }
+      [contenteditable] { border: 1px solid #888; min-height: 96px; padding: 8px; }
+    </style>
+  </head>
   <body>
     <main>
       <h1>单集上传</h1>
+      <nav aria-label="后台导航">
+        <button type="button">内容管理</button>
+        <button type="button">数据中心</button>
+      </nav>
+      <p>测试账号：不应进入 Agent Snapshot</p>
       <label for="audio">选择音频文件</label>
       <input id="audio" name="audio" type="file" accept="audio/*">
       <label for="hidden-audio"><span>点击上传音频</span></label>

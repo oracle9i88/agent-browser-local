@@ -12,6 +12,7 @@ import { defaultRuntimeDir, loadConfig } from "./config.mjs";
 import { HumanPacedExecutor } from "./executor/human-paced.mjs";
 import { BrowserDaemon } from "./server/daemon.mjs";
 import { createApiServer } from "./server/http-server.mjs";
+import { installNetworkEgressPolicy } from "./security/network-egress.mjs";
 
 const sourceDir = path.dirname(fileURLToPath(import.meta.url));
 const runtimeDir = defaultRuntimeDir();
@@ -27,6 +28,29 @@ let mainWindow;
 let contentView;
 let controller;
 let api;
+let egressPolicy;
+
+function hardenUntrustedWebContents(webContents) {
+  webContents.setUserAgent(browserUserAgent);
+  egressPolicy.register(webContents);
+  webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      autoHideMenuBar: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+        safeDialogs: true,
+      },
+    },
+  }));
+  webContents.on("did-create-window", (childWindow) => {
+    hardenUntrustedWebContents(childWindow.webContents);
+  });
+}
 
 function layoutContent() {
   if (!mainWindow || !contentView) return;
@@ -66,30 +90,35 @@ async function createWindow(config) {
       nodeIntegration: false,
       sandbox: true,
       backgroundThrottling: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      safeDialogs: true,
     },
   });
-  contentView.webContents.setUserAgent(browserUserAgent);
   mainWindow.contentView.addChildView(contentView);
   mainWindow.on("resize", layoutContent);
   layoutContent();
 
-  contentView.webContents.setWindowOpenHandler(() => ({
-    action: "allow",
-    overrideBrowserWindowOptions: {
-      autoHideMenuBar: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    },
-  }));
-
-  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
-    callback(false);
-  });
-
   controller = new BrowserController(contentView.webContents, config);
+  egressPolicy = installNetworkEgressPolicy({
+    browserSession: session.defaultSession,
+    config,
+    onBlocked: (decision, details) => {
+      console.warn(
+        `Blocked untrusted page request: ${decision.code} (${details.resourceType})`,
+      );
+      if (details.resourceType === "mainFrame") {
+        controller.setHandoff(decision.reason, {
+          code: "unsafe_page_request",
+          policyCode: decision.code,
+        });
+      }
+    },
+    onMainFrameEscape: (decision) => {
+      controller.setHandoff(decision.reason, { code: decision.code });
+    },
+  });
+  hardenUntrustedWebContents(contentView.webContents);
   controller.on("state", sendState);
   controller.on("handoff", sendState);
 
