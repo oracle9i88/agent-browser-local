@@ -104,8 +104,10 @@ button:disabled { color: #666d79; }
 }
 
 .agent-state.needs-handoff { color: #ffcf70; }
+.agent-state.page-fault { color: #ff8d8d; }
 
-.handoff {
+.handoff,
+.recovery {
   padding: 0 12px;
   border-color: #705a2c;
   color: #ffdb8a;
@@ -113,3 +115,8 @@ button:disabled { color: #666d79; }
   font-size: 13px;
 }
 
+.recovery {
+  border-color: #743f3f;
+  color: #ffb2b2;
+  background: #2a1818;
+}

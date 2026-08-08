@@ -1,5 +1,6 @@
 node_modules/
 runtime/
+dist/
 .agent-browser/
 coverage/
 *.log

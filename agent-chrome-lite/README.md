@@ -6,6 +6,8 @@
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留未来适配定义，按用户当前冻结指令默认不启用。
 
+网易云音乐已记录在 `PLATFORM_BACKLOG`，但当前另有操作者正在真实提交，因此尚未进入 allowlist。必须等对方完成并明确交接，再核验官方创作者入口与登录跳转；在此之前本项目不打开、不刷新或操作网易云页面。
+
 ## 已实现
 
 - Electron/Chromium 独立窗口与独立 Profile，不读取日常 Chrome 数据。
@@ -22,6 +24,8 @@
 - 单队列、人类节奏执行和 JSONL 审计。
 - MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
 - NovaGe/NovaDe 共用 `adapters/python/agent_browser_client.py`；principal 固定为本机 token 映射，服务地址只能是 loopback，上传文件只能来自各自 workspace。
+- macOS 单实例锁：重复双击只唤醒已运行窗口，不创建第二个 daemon 或第二套 Profile。
+- 启动失败会显示本地错误窗口；页面故障会在工具栏显示红色状态，同时明确保留登录资料。
 
 ## 明确不提供
 
@@ -37,6 +41,19 @@
 cd "/Users/evanguo/Documents/New project2/agent-chrome-lite"
 npm start
 ```
+
+也可以双击本地构建产物：`dist/Agent Browser Local.app`。该应用使用 ad-hoc 本地签名，适合当前机器自用，尚未做 Apple Developer ID 公证。
+
+## macOS 打包
+
+```bash
+npm run package:mac
+npm run test:packaged
+```
+
+`package:mac` 使用项目现有 Electron 运行时离线生成 `.app`、版本化 ZIP 和 `release-manifest.json`，不下载新依赖；只打入运行所需的 `src/` 与 `ws`。应用有独立名称、Bundle ID 和图标，并删除 Electron 模板的摄像头、麦克风、蓝牙及任意网络加载权限声明。发布清单记录 ZIP 字节数和 SHA-256。
+
+`test:packaged` 使用 `/tmp` 临时 Profile、随机 loopback 端口和 `about:blank` 启动隐藏应用；随后启动第二份验证单实例锁，再检查四个固定 principal。它不读取正式 Profile，也不打开账号页面。
 
 首次启动会创建：
 

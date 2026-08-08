@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   back: () => ipcRenderer.invoke("browser:back"),
   forward: () => ipcRenderer.invoke("browser:forward"),
   reload: () => ipcRenderer.invoke("browser:reload"),
+  recover: () => ipcRenderer.invoke("browser:recover"),
   clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);
@@ -13,4 +14,3 @@ contextBridge.exposeInMainWorld("agentBrowser", {
     return () => ipcRenderer.removeListener("browser:state", listener);
   },
 });
-

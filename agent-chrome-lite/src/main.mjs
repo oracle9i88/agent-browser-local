@@ -1,4 +1,11 @@
-import { app, BrowserWindow, ipcMain, session, WebContentsView } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  session,
+  WebContentsView,
+} from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +16,7 @@ import {
   buildChromiumUserAgent,
 } from "./browser/user-agent.mjs";
 import { defaultRuntimeDir, loadConfig } from "./config.mjs";
+import { VERSION } from "./constants.mjs";
 import { HumanPacedExecutor } from "./executor/human-paced.mjs";
 import { BrowserDaemon } from "./server/daemon.mjs";
 import { createApiServer } from "./server/http-server.mjs";
@@ -23,12 +31,21 @@ app.setPath(
   "userData",
   process.env.ABL_PROFILE_DIR || path.join(runtimeDir, "profile"),
 );
+const singleInstance = app.requestSingleInstanceLock();
 
 let mainWindow;
 let contentView;
 let controller;
 let api;
 let egressPolicy;
+let daemonReady = false;
+
+function startupErrorMessage(error) {
+  if (error?.code === "EADDRINUSE") {
+    return "本地 daemon 端口已被占用。请先确认 Agent Browser Local 是否已经运行；不要重复启动第二个实例。";
+  }
+  return String(error?.message || error || "未知启动错误").slice(0, 1200);
+}
 
 function hardenUntrustedWebContents(webContents) {
   webContents.setUserAgent(browserUserAgent);
@@ -60,8 +77,19 @@ function layoutContent() {
 
 function sendState() {
   if (!mainWindow?.isDestroyed() && controller) {
-    mainWindow.webContents.send("browser:state", controller.status());
+    mainWindow.webContents.send("browser:state", runtimeState());
   }
+}
+
+function runtimeState() {
+  return {
+    ...controller.status(),
+    daemon: {
+      ready: daemonReady,
+      binding: "loopback-only",
+    },
+    version: VERSION,
+  };
 }
 
 async function createWindow(config) {
@@ -70,6 +98,7 @@ async function createWindow(config) {
     "zh-CN,zh;q=0.9,en;q=0.8",
   );
   mainWindow = new BrowserWindow({
+    show: process.env.ABL_SMOKE_HEADLESS !== "1",
     width: 1440,
     height: 960,
     minWidth: 900,
@@ -133,49 +162,78 @@ async function createWindow(config) {
 }
 
 function installIpc() {
-  ipcMain.handle("browser:status", () => controller.status());
+  ipcMain.handle("browser:status", () => runtimeState());
   ipcMain.handle("browser:navigate", (_event, url) => controller.navigate(url));
   ipcMain.handle("browser:back", () => controller.back());
   ipcMain.handle("browser:forward", () => controller.forward());
   ipcMain.handle("browser:reload", () => controller.reload());
+  ipcMain.handle("browser:recover", () => controller.reload());
   ipcMain.handle("browser:clear-handoff", () => controller.clearHandoff());
 }
 
-app.whenReady().then(async () => {
-  try {
-    const { config, configPath, tokens } = await loadConfig();
-    await createWindow(config);
-    installIpc();
+if (!singleInstance) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
 
-    const executor = new HumanPacedExecutor({
-      minDelayMs: config.security.minActionDelayMs,
-      maxDelayMs: config.security.maxActionDelayMs,
-    });
-    const audit = new AuditLog(path.join(runtimeDir, "audit", "events.jsonl"));
-    const daemon = new BrowserDaemon({ controller, config, executor, audit });
-    api = createApiServer({ daemon, config, controller });
-    await api.listen();
+  app.whenReady().then(async () => {
+    try {
+      const { config, configPath, tokens } = await loadConfig();
+      await createWindow(config);
+      installIpc();
 
-    console.log(`Agent Browser Local listening on http://${config.server.host}:${config.server.port}`);
-    console.log(`Config: ${configPath}`);
-    console.log(`Compatibility UA: Chromium/${process.versions.chrome}`);
-    if (tokens) {
-      console.log("First-run tokens (store them now; only hashes are saved):");
-      for (const [principal, token] of Object.entries(tokens)) {
-        console.log(`${principal}: ${token}`);
+      const executor = new HumanPacedExecutor({
+        minDelayMs: config.security.minActionDelayMs,
+        maxDelayMs: config.security.maxActionDelayMs,
+      });
+      const audit = new AuditLog(path.join(runtimeDir, "audit", "events.jsonl"));
+      const daemon = new BrowserDaemon({ controller, config, executor, audit });
+      api = createApiServer({ daemon, config, controller });
+      await api.listen();
+      daemonReady = true;
+      sendState();
+
+      console.log(`Agent Browser Local listening on http://${config.server.host}:${config.server.port}`);
+      console.log(`Config: ${configPath}`);
+      console.log(`Compatibility UA: Chromium/${process.versions.chrome}`);
+      if (tokens) {
+        console.log("First-run tokens (store them now; only hashes are saved):");
+        for (const [principal, token] of Object.entries(tokens)) {
+          console.log(`${principal}: ${token}`);
+        }
       }
-    }
 
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow(config);
-    });
-  } catch (error) {
-    console.error(error);
-    app.quit();
-  }
-});
+      const smokeExitMs = Number.parseInt(
+        process.env.ABL_SMOKE_EXIT_MS || "",
+        10,
+      );
+      if (Number.isFinite(smokeExitMs) && smokeExitMs > 0) {
+        setTimeout(() => app.quit(), smokeExitMs).unref();
+      }
+
+      app.on("activate", () => {
+        if (BrowserWindow.getAllWindows().length === 0) createWindow(config);
+      });
+    } catch (error) {
+      console.error(error);
+      if (app.isReady()) {
+        dialog.showErrorBox(
+          "Agent Browser Local 无法启动",
+          startupErrorMessage(error),
+        );
+      }
+      app.quit();
+    }
+  });
+}
 
 app.on("before-quit", async () => {
+  daemonReady = false;
   controller?.close();
   if (api) await api.close().catch(() => undefined);
 });

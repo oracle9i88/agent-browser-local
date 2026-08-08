@@ -6,6 +6,15 @@ const HUMAN_ONLY_ACTIONS = Object.freeze([
   "payment",
 ]);
 
+const PLATFORM_BACKLOG = Object.freeze({
+  netease_cloud_music: Object.freeze({
+    label: "网易云音乐",
+    status: "awaiting_active_publisher_handoff",
+    requirement:
+      "当前有其他操作者正在真实提交；交接完成后再核验官方创作者入口与登录跳转，核验前不得写入 allowlist。",
+  }),
+});
+
 const PLATFORM_REGISTRY = Object.freeze({
   xiaoyuzhou: Object.freeze({
     label: "小宇宙",
@@ -102,7 +111,7 @@ const PLATFORM_REGISTRY = Object.freeze({
 export const DEFAULT_PLATFORM_IDS = Object.freeze(
   Object.keys(PLATFORM_REGISTRY).filter((platformId) => platformId !== "suno"),
 );
-export { HUMAN_ONLY_ACTIONS, PLATFORM_REGISTRY };
+export { HUMAN_ONLY_ACTIONS, PLATFORM_BACKLOG, PLATFORM_REGISTRY };
 
 export function contributionTargetsFor(platformIds = DEFAULT_PLATFORM_IDS) {
   const targets = [];

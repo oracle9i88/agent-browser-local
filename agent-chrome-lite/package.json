@@ -11,6 +11,8 @@
   "scripts": {
     "start": "electron .",
     "start:dev": "ACL_DEVTOOLS=1 electron .",
+    "package:mac": "node ./scripts/package-macos.mjs",
+    "test:packaged": "node ./scripts/packaged-smoke.mjs",
     "mcp": "node ./mcp/server.mjs",
     "init-config": "node ./scripts/init-config.mjs",
     "platforms": "node ./scripts/register-platforms.mjs",

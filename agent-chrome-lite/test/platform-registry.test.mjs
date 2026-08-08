@@ -6,6 +6,7 @@ import {
   DEFAULT_PLATFORM_IDS,
   HUMAN_ONLY_ACTIONS,
   mergeContributionTargets,
+  PLATFORM_BACKLOG,
   removeContributionTargets,
 } from "../src/security/platform-registry.mjs";
 
@@ -91,6 +92,18 @@ test("suno stays defined but disabled by default and can be removed locally", ()
   assert.deepEqual(
     removeContributionTargets(targets, ["suno"]),
     contributionTargetsFor(["xiaoyuzhou"]),
+  );
+});
+
+test("netease cloud music is recorded without touching the active publisher", () => {
+  assert.equal(DEFAULT_PLATFORM_IDS.includes("netease_cloud_music"), false);
+  assert.equal(
+    PLATFORM_BACKLOG.netease_cloud_music.status,
+    "awaiting_active_publisher_handoff",
+  );
+  assert.throws(
+    () => contributionTargetsFor(["netease_cloud_music"]),
+    /Unknown platform/,
   );
 });
 
