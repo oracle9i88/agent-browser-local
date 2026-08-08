@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 
 import {
+  BrowserController,
   contributionScopeTransition,
   isExpectedNavigationAbort,
   waitForNavigationQuiet,
@@ -15,6 +17,45 @@ test("only Chromium redirect aborts are treated as expected", () => {
     true,
   );
   assert.equal(isExpectedNavigationAbort({ code: "ERR_NAME_NOT_RESOLVED" }), false);
+});
+
+test("status lazily clears stale outside-scope handoff on the final allowed URL", () => {
+  const webContents = new EventEmitter();
+  webContents.getURL = () =>
+    "https://channels.weixin.qq.com/platform/post/create";
+  webContents.getTitle = () => "视频号助手";
+  webContents.isLoading = () => false;
+  webContents.navigationHistory = {
+    canGoBack: () => true,
+    canGoForward: () => false,
+  };
+  const config = {
+    security: {
+      maxSnapshotControls: 180,
+      maxSnapshotHints: 80,
+      contributionTargets: [
+        {
+          origin: "https://channels.weixin.qq.com",
+          pathPrefixes: ["/platform/post/create"],
+        },
+      ],
+    },
+  };
+  const controller = new BrowserController(webContents, config);
+  controller.handoff = {
+    required: true,
+    detail: { code: "outside_contribution_scope" },
+  };
+
+  assert.equal(controller.status().handoff, null);
+  controller.handoff = {
+    required: true,
+    detail: { code: "manual_auth_surface_requires_handoff" },
+  };
+  assert.equal(
+    controller.status().handoff.detail.code,
+    "manual_auth_surface_requires_handoff",
+  );
 });
 
 test("navigation settle waits through a delayed redirect activity", async () => {

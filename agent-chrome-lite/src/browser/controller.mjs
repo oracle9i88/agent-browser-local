@@ -171,9 +171,16 @@ export class BrowserController extends EventEmitter {
   }
 
   status() {
+    const currentUrl = this.webContents.getURL();
+    if (
+      contributionScopeTransition(this.config, currentUrl, this.handoff) ===
+      "clear"
+    ) {
+      this.handoff = null;
+    }
     return {
       title: this.webContents.getTitle(),
-      url: this.webContents.getURL(),
+      url: currentUrl,
       loading: this.webContents.isLoading(),
       canGoBack: this.webContents.navigationHistory.canGoBack(),
       canGoForward: this.webContents.navigationHistory.canGoForward(),
