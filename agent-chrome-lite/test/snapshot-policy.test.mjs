@@ -165,6 +165,69 @@ test("unfocused semantic editor remains discoverable as an activation ref", asyn
   assert.equal(store.resolve(result.controls[0].ref).backendNodeId, 71);
 });
 
+test("semantic hint without a DOM id inherits the nearest AX parent mapping", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "title-container",
+          backendDOMNodeId: 81,
+          role: { value: "generic" },
+          name: { value: "" },
+        },
+        {
+          nodeId: "title-placeholder",
+          parentId: "title-container",
+          role: { value: "StaticText" },
+          name: { value: "请在这里输入标题" },
+        },
+      ],
+      {
+        91: {
+          tag: "div",
+          contentEditable: true,
+          value: "",
+          visible: true,
+        },
+      },
+      { 81: "91" },
+    ),
+    {
+      title: "公众号",
+      url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit",
+    },
+  );
+
+  assert.equal(result.controls.length, 1);
+  assert.equal(result.controls[0].role, "textbox");
+  assert.equal(result.controls[0].name, "请在这里输入标题");
+  assert.equal(store.resolve(result.controls[0].ref).backendNodeId, 91);
+});
+
+test("generic content labels are not promoted to editor activation refs", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "recommendation",
+          backendDOMNodeId: 101,
+          role: { value: "StaticText" },
+          name: { value: "内容有可能被推荐至其他场景" },
+        },
+      ],
+      { 101: { tag: "span", visible: true } },
+    ),
+    {
+      title: "公众号",
+      url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit",
+    },
+  );
+
+  assert.deepEqual(result.controls, []);
+});
+
 test("ximalaya upload survives while management navigation is suppressed", () => {
   const pageUrl = "https://studio.ximalaya.com/upload";
   assert.equal(
