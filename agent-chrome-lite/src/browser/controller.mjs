@@ -225,6 +225,13 @@ export class BrowserController extends EventEmitter {
       isLoading: () => this.webContents.isLoading(),
       lastActivityAt: () => this.lastNavigationActivityAt,
     });
+    const finalUrl = this.webContents.getURL();
+    if (
+      contributionScopeTransition(this.config, finalUrl, this.handoff) ===
+      "clear"
+    ) {
+      this.clearHandoff();
+    }
     return this.status();
   }
 
