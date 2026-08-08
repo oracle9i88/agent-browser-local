@@ -104,6 +104,39 @@ test("semantic editor hints map to the nearest editable DOM ancestor", async () 
   );
 });
 
+test("empty rich editor does not report its placeholder as authored content", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "body-hint",
+          backendDOMNodeId: 51,
+          role: { value: "StaticText" },
+          name: { value: "从这里开始写正文" },
+        },
+      ],
+      {
+        61: {
+          tag: "div",
+          contentEditable: true,
+          placeholder: "从这里开始写正文",
+          value: "",
+          visible: true,
+        },
+      },
+      { 51: "61" },
+    ),
+    {
+      title: "公众号",
+      url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit",
+    },
+  );
+
+  assert.equal(result.controls[0].name, "从这里开始写正文");
+  assert.equal(result.controls[0].value, "");
+});
+
 test("ximalaya upload survives while management navigation is suppressed", () => {
   const pageUrl = "https://studio.ximalaya.com/upload";
   assert.equal(

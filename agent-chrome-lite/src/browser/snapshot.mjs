@@ -227,6 +227,7 @@ export class SnapshotStore {
         const candidate = await resolveEditableFromSemanticHint(
           cdp,
           node.backendDOMNodeId,
+          semanticName,
         ).catch(() => null);
         if (!candidate?.backendNodeId || candidate.metadata?.visible === false) continue;
         if (
@@ -322,24 +323,69 @@ export class SnapshotStore {
   }
 }
 
-export async function resolveEditableFromSemanticHint(cdp, backendNodeId) {
+export async function resolveEditableFromSemanticHint(
+  cdp,
+  backendNodeId,
+  semanticName = "",
+) {
   const { object } = await cdp.send("DOM.resolveNode", { backendNodeId });
   if (!object?.objectId) return null;
   const result = await cdp.send("Runtime.callFunctionOn", {
     objectId: object.objectId,
     returnByValue: false,
-    functionDeclaration: `function () {
+    arguments: [{ value: semanticName }],
+    functionDeclaration: `function (semanticName) {
       const asElement = (node) =>
         node?.nodeType === 1 ? node : node?.parentElement || null;
+      const normalize = (value) =>
+        String(value || "").replace(/\\s+/g, "").toLowerCase();
       const isEditable = (element) => {
         if (!element) return false;
         const tag = (element.tagName || "").toLowerCase();
         return element.isContentEditable || tag === "input" || tag === "textarea";
       };
-      let current = asElement(this);
+      const isVisible = (element) => {
+        const rect = element.getBoundingClientRect?.();
+        const style = element.ownerDocument?.defaultView?.getComputedStyle?.(element);
+        return Boolean(
+          rect && rect.width > 0 && rect.height > 0 && style &&
+          style.visibility !== "hidden" && style.display !== "none"
+        );
+      };
+      const semantic = normalize(semanticName);
+      const anchor = asElement(this);
+      let current = anchor;
       let depth = 0;
       while (current && depth < 12) {
         if (isEditable(current)) return current;
+        current = current.parentElement;
+        depth += 1;
+      }
+      current = anchor;
+      depth = 0;
+      while (current && depth < 8) {
+        const pending = Array.from(current.children || []);
+        const candidates = [];
+        let visited = 0;
+        while (pending.length && visited < 180) {
+          visited += 1;
+          const child = pending.shift();
+          if (isEditable(child) && isVisible(child)) {
+            const label = normalize(
+              child.getAttribute?.("aria-label") ||
+              child.getAttribute?.("placeholder") ||
+              child.getAttribute?.("data-placeholder") ||
+              child.getAttribute?.("aria-placeholder") ||
+              child.getAttribute?.("title")
+            );
+            if (label && semantic && (label.includes(semantic) || semantic.includes(label))) {
+              return child;
+            }
+            candidates.push(child);
+          }
+          pending.push(...Array.from(child.children || []));
+        }
+        if (candidates.length === 1) return candidates[0];
         current = current.parentElement;
         depth += 1;
       }
@@ -422,19 +468,26 @@ export async function readNodeMetadata(cdp, backendNodeId) {
         };
         return collectLines(root).join("\\n");
       };
+      const resolvedPlaceholder =
+        this.getAttribute?.("placeholder") ||
+        this.getAttribute?.("data-placeholder") ||
+        (this.isContentEditable ? descendantPlaceholder(this) : "");
       const editableText = this.isContentEditable ? serializeEditable(this) : undefined;
+      const normalizedEditable = String(editableText || "").replace(/\\s+/g, "");
+      const normalizedPlaceholder = String(resolvedPlaceholder || "").replace(/\\s+/g, "");
+      const contentValue =
+        normalizedPlaceholder && normalizedEditable === normalizedPlaceholder
+          ? ""
+          : editableText;
       const value = tag === "input" || tag === "textarea" || tag === "select"
         ? this.value
-        : editableText;
+        : contentValue;
       return {
         tag,
         type: (this.getAttribute?.("type") || this.type || "").toLowerCase(),
         nameAttr: this.getAttribute?.("name") || "",
         ariaLabel: this.getAttribute?.("aria-label") || "",
-        placeholder:
-          this.getAttribute?.("placeholder") ||
-          this.getAttribute?.("data-placeholder") ||
-          (this.isContentEditable ? descendantPlaceholder(this) : ""),
+        placeholder: resolvedPlaceholder,
         title: this.getAttribute?.("title") || "",
         href: this.href || this.getAttribute?.("href") || "",
         formAction: this.form?.action || this.getAttribute?.("formaction") || "",
