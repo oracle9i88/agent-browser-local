@@ -49,6 +49,16 @@ test("wechat official registry distinguishes editor from list by query", () => {
   ]);
 });
 
+test("kuaishou registry exposes publish, never the management list", () => {
+  assert.deepEqual(contributionTargetsFor(["kuaishou"]), [
+    {
+      platform: "kuaishou",
+      origin: "https://cp.kuaishou.com",
+      pathPrefixes: ["/article/publish/video"],
+    },
+  ]);
+});
+
 test("platform registration is additive and idempotent", () => {
   const existing = [
     {

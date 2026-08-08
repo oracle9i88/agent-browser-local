@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { classifyAction } from "../src/security/risk-policy.mjs";
+import {
+  classifyAction,
+  classifySnapshotSurface,
+} from "../src/security/risk-policy.mjs";
 
 test("blocks final submit and publish controls", () => {
   for (const node of [
@@ -72,6 +75,35 @@ test("blocks credentials and verification fields", () => {
   ]) {
     assert.equal(classifyAction({ action: "fill", node }).blocked, true);
   }
+});
+
+test("same-URL login surfaces trigger handoff before snapshot data is returned", () => {
+  const risk = classifySnapshotSurface({
+    controls: [
+      {
+        tag: "input",
+        type: "tel",
+        role: "textbox",
+        placeholder: "请输入验证码",
+      },
+    ],
+  });
+  assert.equal(risk.blocked, true);
+  assert.equal(risk.code, "manual_auth_surface_requires_handoff");
+});
+
+test("ordinary contribution fields do not look like an auth surface", () => {
+  const risk = classifySnapshotSurface({
+    controls: [
+      {
+        tag: "input",
+        type: "text",
+        role: "textbox",
+        placeholder: "请输入作品标题",
+      },
+    ],
+  });
+  assert.equal(risk.blocked, false);
 });
 
 test("only native file inputs or verified semantic upload triggers are upload targets", () => {

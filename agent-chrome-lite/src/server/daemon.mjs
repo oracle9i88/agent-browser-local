@@ -3,7 +3,10 @@ import path from "node:path";
 import { assertAllowedUploadPath } from "../config.mjs";
 import { CAPABILITIES } from "../constants.mjs";
 import { assertContributionUrl } from "../security/contribution-policy.mjs";
-import { classifyAction } from "../security/risk-policy.mjs";
+import {
+  classifyAction,
+  classifySnapshotSurface,
+} from "../security/risk-policy.mjs";
 
 export class DaemonError extends Error {
   constructor(status, code, message, detail = undefined) {
@@ -113,6 +116,12 @@ export class BrowserDaemon {
         this.requireNoHandoff();
         this.requireContributionPage();
         const result = await this.controller.snapshot();
+        const surfaceRisk = classifySnapshotSurface(result);
+        if (surfaceRisk.blocked) {
+          return this.blocked(identity, surfaceRisk, {
+            action: "snapshot",
+          });
+        }
         await this.audit.record({
           event: "browser.snapshot",
           principal: identity.principal,

@@ -23,6 +23,12 @@ function fixture(node) {
       throw new Error("click must not execute");
     },
     fillRef: async () => ({ ok: true }),
+    snapshot: async () => ({
+      snapshotId: "snapshot01",
+      url: "https://example.test/create",
+      controls: [],
+      hints: [],
+    }),
   };
   const daemon = new BrowserDaemon({
     controller,
@@ -100,6 +106,40 @@ test("pending handoff freezes browser automation until the human clears it", asy
       error.status === 409 &&
       error.code === "handoff_pending",
   );
+});
+
+test("snapshot freezes automation when an in-page login surface keeps an allowed URL", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "input",
+    type: "text",
+    role: "textbox",
+  });
+  identity.capabilities.push(CAPABILITIES.SNAPSHOT);
+  controller.snapshot = async () => ({
+    snapshotId: "login01",
+    url: "https://example.test/create",
+    controls: [
+      {
+        ref: "login01:1",
+        tag: "input",
+        type: "tel",
+        role: "textbox",
+        placeholder: "请输入验证码",
+      },
+    ],
+    hints: [],
+  });
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.snapshot"),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 409 &&
+      error.code === "manual_auth_surface_requires_handoff",
+  );
+  assert.equal(controller.handoff.required, true);
+  assert.equal(events[0].event, "action.blocked");
+  assert.equal(events[0].action, "snapshot");
 });
 
 test("fill audit never copies content-derived accessibility names", async () => {

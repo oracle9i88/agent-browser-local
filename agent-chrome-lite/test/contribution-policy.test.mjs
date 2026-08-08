@@ -36,7 +36,7 @@ const config = {
       },
       {
         origin: "https://cp.kuaishou.com",
-        pathPrefixes: ["/article/manage/video"],
+        pathPrefixes: ["/article/publish/video"],
       },
       {
         origin: "https://mp.weixin.qq.com",
@@ -132,12 +132,12 @@ test("allows only configured contribution surfaces", () => {
   assert.equal(
     isContributionUrlAllowed(
       config,
-      "https://cp.kuaishou.com/article/manage/video",
+      "https://cp.kuaishou.com/article/publish/video",
     ),
     true,
   );
   assert.equal(
-    isContributionUrlAllowed(config, "https://cp.kuaishou.com/article/manage"),
+    isContributionUrlAllowed(config, "https://cp.kuaishou.com/article/manage/video"),
     false,
   );
   assert.equal(

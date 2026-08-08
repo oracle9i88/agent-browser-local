@@ -98,11 +98,11 @@ const PLATFORM_REGISTRY = Object.freeze({
   }),
   kuaishou: Object.freeze({
     label: "快手",
-    evidence: "https://cp.kuaishou.com/article/manage/video",
+    evidence: "https://cp.kuaishou.com/article/publish/video",
     contributionTargets: Object.freeze([
       Object.freeze({
         origin: "https://cp.kuaishou.com",
-        pathPrefixes: Object.freeze(["/article/manage/video"]),
+        pathPrefixes: Object.freeze(["/article/publish/video"]),
       }),
     ]),
   }),

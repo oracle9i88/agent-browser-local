@@ -41,6 +41,42 @@ function matchesAny(text, patterns) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function surfaceText(node) {
+  return [
+    textOf(node),
+    node?.placeholder,
+    node?.nameAttr,
+    node?.autocomplete,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function classifySnapshotSurface(snapshot) {
+  const controls = Array.isArray(snapshot?.controls) ? snapshot.controls : [];
+  const hasAuthControl = controls.some((node) => {
+    const type = String(node?.type || "").toLowerCase();
+    const autocomplete = String(node?.autocomplete || "");
+    return (
+      type === "password" ||
+      /password|one-time-code/i.test(autocomplete) ||
+      matchesAny(surfaceText(node), authWords)
+    );
+  });
+
+  if (hasAuthControl) {
+    return {
+      blocked: true,
+      code: "manual_auth_surface_requires_handoff",
+      reason: "页面出现登录、密码、验证码或身份验证表单，必须由用户本人接管。",
+    };
+  }
+
+  return { blocked: false };
+}
+
 export function classifyAction({ action, node, url }) {
   const text = `${textOf(node)} ${url || ""}`.trim();
   const type = String(node?.type || "").toLowerCase();
