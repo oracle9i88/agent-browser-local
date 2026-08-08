@@ -7,7 +7,7 @@ import {
   SnapshotStore,
 } from "../src/browser/snapshot.mjs";
 
-function fakeCdp(nodes, metadata) {
+function fakeCdp(nodes, metadata, semanticCandidates = {}) {
   return {
     async send(method, params = {}) {
       if (method === "Accessibility.getFullAXTree") return { nodes };
@@ -15,7 +15,16 @@ function fakeCdp(nodes, metadata) {
         return { object: { objectId: String(params.backendNodeId) } };
       }
       if (method === "Runtime.callFunctionOn") {
+        if (params.returnByValue === false) {
+          const candidate = semanticCandidates[params.objectId];
+          return candidate
+            ? { result: { objectId: candidate } }
+            : { result: { subtype: "null" } };
+        }
         return { result: { value: metadata[params.objectId] || {} } };
+      }
+      if (method === "DOM.describeNode") {
+        return { node: { backendNodeId: Number(params.objectId) } };
       }
       throw new Error(`Unexpected CDP method: ${method}`);
     },
@@ -41,6 +50,58 @@ test("dashboard snapshot suppresses readback controls and static page data", asy
 
   assert.deepEqual(result.controls, []);
   assert.deepEqual(result.hints, []);
+});
+
+test("semantic editor hints map to the nearest editable DOM ancestor", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "title-hint",
+          backendDOMNodeId: 31,
+          role: { value: "StaticText" },
+          name: { value: "请在这里输入标题" },
+        },
+        {
+          nodeId: "body-hint",
+          backendDOMNodeId: 32,
+          role: { value: "StaticText" },
+          name: { value: "从这里开始写正文" },
+        },
+      ],
+      {
+        41: {
+          tag: "div",
+          contentEditable: true,
+          placeholder: "请在这里输入标题",
+          value: "",
+          visible: true,
+        },
+        42: {
+          tag: "div",
+          contentEditable: true,
+          placeholder: "从这里开始写正文",
+          value: "第一段\n\n第二段\nhttps://example.test",
+          visible: true,
+        },
+      },
+      { 31: "41", 32: "42" },
+    ),
+    {
+      title: "公众号",
+      url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit",
+    },
+  );
+
+  assert.equal(result.controls.length, 2);
+  assert.equal(result.controls[0].name, "请在这里输入标题");
+  assert.equal(result.controls[0].contentEditable, true);
+  assert.equal(result.controls[1].name, "从这里开始写正文");
+  assert.equal(
+    result.controls[1].value,
+    "第一段\n\n第二段\nhttps://example.test",
+  );
 });
 
 test("ximalaya upload survives while management navigation is suppressed", () => {

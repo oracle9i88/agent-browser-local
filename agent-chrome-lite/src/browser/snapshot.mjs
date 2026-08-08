@@ -29,6 +29,7 @@ const HINT_ROLES = new Set([
 const RECORD_DATE = /(?:19|20)\d{2}[./-]\d{1,2}[./-]\d{1,2}/;
 const UPLOAD_HINT = /upload|choose\s+(?:a\s+)?file|select\s+(?:a\s+)?file|上传(?:音频|文件|封面)?|选择(?:音频|文件|封面)/i;
 const EDITOR_HINT = /show\s*notes|description|body|editor|notes|简介|正文|内容|说明|编辑/i;
+const SEMANTIC_EDIT_HINT = /title|headline|show\s*notes|description|body|editor|notes|标题|正文|内容|说明|编辑/i;
 const READ_ONLY_CONTROL_NAME = /(?:^|\s)(?:dashboard|analytics|insights|statistics|stats|comments?|messages?|notifications?|subscribers?|followers?|fans?|earnings?|revenue|income|help(?:\s+center)?|customer\s+service|account(?:\s+settings)?|profile|home)(?:\s|$)|^(?:首页|主页|消息|在线客服|帮助中心|问题咨询|个人信息|设置|通知中心|草稿箱|成长中心|创作服务|其他服务|活动中心|数据概览|作品分析|直播数据|粉丝分析|创作灵感|热点榜单|创作学院|音乐人|推广资源管理)$|内容管理|互动管理|数据中心|数据分析|直播管理|视频管理|我的作品|创作收益|收入与服务|带货中心|作品推广|创作成长|创作实验室|账号服务|专辑分类|定时发布|关于腾讯|运营规范/i;
 const CONTRIBUTION_HINT = /upload|choose\s+(?:a\s+)?file|select\s+(?:a\s+)?file|title|description|show\s*notes|body|editor|notes|cover|agreement|publish|submit|schedule|draft|preview|link|location|collection|original|tags?|topics?|标题|描述|简介|正文|说明|编辑|上传|选择文件|封面|协议|创建单集|链接|声明原创|原创|标注|位置|合集|活动|定时|不定时|话题|添加描述|保存草稿|手机预览|发表|视频|图文|音乐|音频/i;
 
@@ -207,6 +208,58 @@ export class SnapshotStore {
       }
     }
 
+    // Some rich editors expose only their placeholder text in the AX tree and
+    // omit the surrounding contenteditable element as an actionable AX node.
+    // Start from that semantic AX hint, then mechanically map its DOM ancestry
+    // to the nearest editable element. This remains ref-based semantic
+    // discovery: CSS, XPath and fixed coordinates are never used as locators.
+    if (controls.length < this.maxControls) {
+      for (const node of nodes) {
+        if (
+          node.ignored ||
+          !node.backendDOMNodeId ||
+          !HINT_ROLES.has(compactText(axValue(node.role), 80))
+        ) {
+          continue;
+        }
+        const semanticName = compactText(axValue(node.name), 500).trim();
+        if (!semanticName || !SEMANTIC_EDIT_HINT.test(semanticName)) continue;
+        const candidate = await resolveEditableFromSemanticHint(
+          cdp,
+          node.backendDOMNodeId,
+        ).catch(() => null);
+        if (!candidate?.backendNodeId || candidate.metadata?.visible === false) continue;
+        if (
+          [...refs.values()].some(
+            (entry) => entry.backendNodeId === candidate.backendNodeId,
+          )
+        ) {
+          continue;
+        }
+        const ref = `${epoch}:${controls.length + 1}`;
+        const metadata = candidate.metadata || {};
+        const control = {
+          ref,
+          role: metadata.role || "textbox",
+          name:
+            metadata.ariaLabel ||
+            metadata.placeholder ||
+            metadata.title ||
+            semanticName,
+          value: compactText(metadata.value, 500),
+          disabled: Boolean(metadata.disabled),
+          checked:
+            typeof metadata.checked === "boolean" ? metadata.checked : undefined,
+          ...metadata,
+        };
+        delete control.visible;
+        if (isReadOnlyControl(control, url)) continue;
+        controls.push(control);
+        refs.set(ref, { backendNodeId: candidate.backendNodeId, node: control });
+        if (controls.length >= this.maxControls) break;
+      }
+    }
+
     const contributionForm = controls.some(
       (control) =>
         control.contentEditable ||
@@ -267,6 +320,42 @@ export class SnapshotStore {
       },
     };
   }
+}
+
+export async function resolveEditableFromSemanticHint(cdp, backendNodeId) {
+  const { object } = await cdp.send("DOM.resolveNode", { backendNodeId });
+  if (!object?.objectId) return null;
+  const result = await cdp.send("Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    returnByValue: false,
+    functionDeclaration: `function () {
+      const asElement = (node) =>
+        node?.nodeType === 1 ? node : node?.parentElement || null;
+      const isEditable = (element) => {
+        if (!element) return false;
+        const tag = (element.tagName || "").toLowerCase();
+        return element.isContentEditable || tag === "input" || tag === "textarea";
+      };
+      let current = asElement(this);
+      let depth = 0;
+      while (current && depth < 12) {
+        if (isEditable(current)) return current;
+        current = current.parentElement;
+        depth += 1;
+      }
+      return null;
+    }`,
+  });
+  if (!result.result?.objectId || result.result.subtype === "null") return null;
+  const described = await cdp.send("DOM.describeNode", {
+    objectId: result.result.objectId,
+  });
+  const candidateBackendNodeId = described.node?.backendNodeId;
+  if (!candidateBackendNodeId) return null;
+  return {
+    backendNodeId: candidateBackendNodeId,
+    metadata: await readNodeMetadata(cdp, candidateBackendNodeId),
+  };
 }
 
 export async function readNodeMetadata(cdp, backendNodeId) {

@@ -26,17 +26,23 @@ function render(state) {
     agentState.classList.remove("page-fault");
     recovery.hidden = true;
     handoff.hidden = false;
+    handoff.disabled = false;
+    handoff.textContent = "我已接管";
   } else if (!state.daemon?.ready) {
     agentState.textContent = "本地 daemon 启动中";
     agentState.classList.remove("needs-handoff", "page-fault");
     recovery.hidden = true;
-    handoff.hidden = true;
+    handoff.hidden = false;
+    handoff.disabled = true;
+    handoff.textContent = "Agent 未就绪";
   } else {
     agentState.textContent = `本地安全模式 · v${state.version}`;
     agentState.classList.remove("needs-handoff");
     agentState.classList.remove("page-fault");
     recovery.hidden = true;
-    handoff.hidden = true;
+    handoff.hidden = false;
+    handoff.disabled = true;
+    handoff.textContent = "Agent 可操作";
   }
 }
 

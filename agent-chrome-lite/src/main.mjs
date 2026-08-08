@@ -110,7 +110,9 @@ async function waitForToolbarChange(previousState) {
       const inspect = () => {
         const result = {
           state: document.querySelector("#agent-state")?.textContent || "",
-          handoffHidden: document.querySelector("#handoff")?.hidden
+          handoffHidden: document.querySelector("#handoff")?.hidden,
+          handoffDisabled: document.querySelector("#handoff")?.disabled,
+          handoffText: document.querySelector("#handoff")?.textContent || ""
         };
         if (result.state !== ${JSON.stringify(previousState)} || Date.now() - startedAt >= 1000) {
           resolve(result);
@@ -205,8 +207,14 @@ async function createWindow(config) {
   const expectedHandoff = Boolean(controller.status().handoff?.required);
   const toolbarReady = await waitForToolbarChange("本地安全模式");
   const expectedStateRendered = expectedHandoff
-    ? toolbarReady.state.startsWith("需要你接管：") && toolbarReady.handoffHidden === false
-    : toolbarReady.state === "本地 daemon 启动中" && toolbarReady.handoffHidden === true;
+    ? toolbarReady.state.startsWith("需要你接管：") &&
+      toolbarReady.handoffHidden === false &&
+      toolbarReady.handoffDisabled === false &&
+      toolbarReady.handoffText === "我已接管"
+    : toolbarReady.state === "本地 daemon 启动中" &&
+      toolbarReady.handoffHidden === false &&
+      toolbarReady.handoffDisabled === true &&
+      toolbarReady.handoffText === "Agent 未就绪";
   if (!expectedStateRendered) {
     throw new Error("安全工具栏初始化失败：启动状态未渲染");
   }
@@ -259,9 +267,13 @@ if (!singleInstance) {
       const runningHandoff = Boolean(controller.status().handoff?.required);
       const runningStateRendered = runningHandoff
         ? toolbarRunning.state.startsWith("需要你接管：") &&
-          toolbarRunning.handoffHidden === false
+          toolbarRunning.handoffHidden === false &&
+          toolbarRunning.handoffDisabled === false &&
+          toolbarRunning.handoffText === "我已接管"
         : toolbarRunning.state.includes(`v${VERSION}`) &&
-          toolbarRunning.handoffHidden === true;
+          toolbarRunning.handoffHidden === false &&
+          toolbarRunning.handoffDisabled === true &&
+          toolbarRunning.handoffText === "Agent 可操作";
       if (!runningStateRendered) {
         throw new Error("安全工具栏初始化失败：daemon 就绪状态未渲染");
       }
