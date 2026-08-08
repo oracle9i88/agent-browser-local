@@ -4,11 +4,25 @@ import assert from "node:assert/strict";
 import {
   contributionTargetsFor,
   DEFAULT_PLATFORM_IDS,
+  hardenLegacyContributionTargets,
   HUMAN_ONLY_ACTIONS,
   mergeContributionTargets,
   PLATFORM_BACKLOG,
   removeContributionTargets,
 } from "../src/security/platform-registry.mjs";
+
+test("xiaoyuzhou registry exposes one selected podcast, never the program list", () => {
+  assert.deepEqual(contributionTargetsFor(["xiaoyuzhou"]), [
+    {
+      platform: "xiaoyuzhou",
+      origin: "https://podcaster.xiaoyuzhoufm.com",
+      pathTemplates: ["/podcast/:podcastId"],
+      excludedTemplateValues: {
+        podcastId: ["create", "new"],
+      },
+    },
+  ]);
+});
 
 test("ximalaya registry exposes only verified contribution entry paths", () => {
   assert.deepEqual(contributionTargetsFor(["ximalaya"]), [
@@ -64,13 +78,40 @@ test("platform registration is additive and idempotent", () => {
     {
       platform: "xiaoyuzhou",
       origin: "https://podcaster.xiaoyuzhoufm.com",
-      pathPrefixes: ["/"],
+      pathTemplates: ["/podcast/:podcastId"],
+      excludedTemplateValues: {
+        podcastId: ["create", "new"],
+      },
     },
   ];
   const once = mergeContributionTargets(existing, ["ximalaya"]);
   const twice = mergeContributionTargets(once, ["ximalaya"]);
   assert.deepEqual(twice, once);
   assert.equal(once.length, 3);
+});
+
+test("legacy Xiaoyuzhou origin-wide access is tightened without enabling removed platforms", () => {
+  const legacy = [
+    {
+      platform: "xiaoyuzhou",
+      origin: "https://podcaster.xiaoyuzhoufm.com",
+      pathPrefixes: ["/"],
+    },
+    {
+      platform: "custom",
+      origin: "https://studio.example.test",
+      pathPrefixes: ["/upload"],
+    },
+  ];
+  assert.deepEqual(hardenLegacyContributionTargets(legacy), [
+    {
+      platform: "custom",
+      origin: "https://studio.example.test",
+      pathPrefixes: ["/upload"],
+    },
+    ...contributionTargetsFor(["xiaoyuzhou"]),
+  ]);
+  assert.deepEqual(hardenLegacyContributionTargets([]), []);
 });
 
 test("platform registration narrows a legacy origin-wide target", () => {

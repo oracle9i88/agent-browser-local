@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -7,7 +7,10 @@ import {
   CONFIRMATION_POLICY,
   DEFAULT_CAPABILITIES,
 } from "./constants.mjs";
-import { contributionTargetsFor } from "./security/platform-registry.mjs";
+import {
+  contributionTargetsFor,
+  hardenLegacyContributionTargets,
+} from "./security/platform-registry.mjs";
 
 const CONFIG_VERSION = 1;
 const DEFAULT_PRINCIPALS = ["codex", "claude", "novage", "novade"];
@@ -102,7 +105,18 @@ export async function loadConfig(configPath = defaultConfigPath()) {
   }
 
   const config = JSON.parse(raw);
+  const beforeTargets = JSON.stringify(config.security?.contributionTargets || []);
+  if (config.security?.contributionTargets) {
+    config.security.contributionTargets = hardenLegacyContributionTargets(
+      config.security.contributionTargets,
+    );
+  }
   validateConfig(config);
+  if (JSON.stringify(config.security.contributionTargets) !== beforeTargets) {
+    const tempPath = `${configPath}.${process.pid}.security-upgrade.tmp`;
+    await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    await rename(tempPath, configPath);
+  }
   return { config, configPath, tokenPath: null, tokens: null };
 }
 
@@ -126,16 +140,41 @@ function validateConfig(config) {
     } catch {
       throw new Error("Invalid contribution target origin");
     }
-    if (origin !== target.origin || !Array.isArray(target.pathPrefixes)) {
+    const hasPrefixes = Array.isArray(target.pathPrefixes);
+    const hasTemplates = Array.isArray(target.pathTemplates);
+    if (origin !== target.origin || (!hasPrefixes && !hasTemplates)) {
       throw new Error("Invalid contribution target");
     }
     if (
-      target.pathPrefixes.length === 0 ||
-      target.pathPrefixes.some(
+      (hasPrefixes && target.pathPrefixes.some(
         (prefix) => typeof prefix !== "string" || !prefix.startsWith("/"),
-      )
+      )) ||
+      (hasTemplates && target.pathTemplates.some(
+        (template) =>
+          typeof template !== "string" ||
+          !template.startsWith("/") ||
+          template.split("/").some(
+            (part) => part.startsWith(":") && !/^:[A-Za-z][A-Za-z0-9_]*$/.test(part),
+          ),
+      )) ||
+      (hasPrefixes && target.pathPrefixes.length === 0 &&
+        (!hasTemplates || target.pathTemplates.length === 0)) ||
+      (hasTemplates && target.pathTemplates.length === 0 &&
+        (!hasPrefixes || target.pathPrefixes.length === 0))
     ) {
-      throw new Error("Invalid contribution target path prefix");
+      throw new Error("Invalid contribution target path rule");
+    }
+    if (target.excludedTemplateValues) {
+      for (const [name, values] of Object.entries(target.excludedTemplateValues)) {
+        if (
+          !name ||
+          !Array.isArray(values) ||
+          values.length === 0 ||
+          values.some((value) => typeof value !== "string")
+        ) {
+          throw new Error("Invalid contribution target template exclusion");
+        }
+      }
     }
     if (target.requiredSearchParams) {
       for (const [name, values] of Object.entries(target.requiredSearchParams)) {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   isContributionHint,
+  isKnownCollectionSurface,
   isReadOnlyControl,
   SnapshotStore,
 } from "../src/browser/snapshot.mjs";
@@ -30,6 +31,86 @@ function fakeCdp(nodes, metadata, semanticCandidates = {}) {
     },
   };
 }
+
+test("Xiaoyuzhou program collection is opaque before AX is read", async () => {
+  assert.equal(
+    isKnownCollectionSurface("https://podcaster.xiaoyuzhoufm.com/podcast"),
+    true,
+  );
+  assert.equal(
+    isKnownCollectionSurface("https://podcaster.xiaoyuzhoufm.com/podcast/abc123"),
+    false,
+  );
+
+  let cdpCalls = 0;
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    {
+      async send() {
+        cdpCalls += 1;
+        throw new Error("collection surfaces must not read the accessibility tree");
+      },
+    },
+    {
+      title: "节目列表",
+      url: "https://podcaster.xiaoyuzhoufm.com/podcast",
+    },
+  );
+
+  assert.equal(cdpCalls, 0);
+  assert.deepEqual(result.controls, []);
+  assert.deepEqual(result.hints, []);
+});
+
+test("selected Xiaoyuzhou workspace exposes creation, not program entity links", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "create-episode",
+          backendDOMNodeId: 201,
+          role: { value: "button" },
+          name: { value: "创建单集" },
+        },
+        {
+          nodeId: "podcast-entity",
+          backendDOMNodeId: 202,
+          role: { value: "link" },
+          name: { value: "节目名称" },
+        },
+        {
+          nodeId: "analytics",
+          backendDOMNodeId: 203,
+          role: { value: "link" },
+          name: { value: "数据分析" },
+        },
+      ],
+      {
+        201: { tag: "button", type: "button", visible: true },
+        202: {
+          tag: "a",
+          href: "https://podcaster.xiaoyuzhoufm.com/podcast/abc123",
+          visible: true,
+        },
+        203: {
+          tag: "a",
+          href: "https://podcaster.xiaoyuzhoufm.com/podcast/abc123/data-analysis/content",
+          visible: true,
+        },
+      },
+    ),
+    {
+      title: "节目后台",
+      url: "https://podcaster.xiaoyuzhoufm.com/podcast/abc123",
+    },
+  );
+
+  assert.deepEqual(
+    result.controls.map(({ role, name }) => ({ role, name })),
+    [{ role: "button", name: "创建单集" }],
+  );
+});
 
 test("dashboard snapshot suppresses readback controls and static page data", async () => {
   const store = new SnapshotStore();

@@ -6,6 +6,20 @@ function matchesPathPrefix(pathname, prefix) {
   return pathname === normalized || pathname.startsWith(`${normalized}/`);
 }
 
+function matchesPathTemplate(pathname, template, excludedTemplateValues = {}) {
+  const actual = String(pathname || "").split("/").filter(Boolean);
+  const expected = String(template || "").split("/").filter(Boolean);
+  if (actual.length !== expected.length) return false;
+  return expected.every((part, index) => {
+    if (!part.startsWith(":")) return actual[index] === part;
+    const name = part.slice(1);
+    const value = actual[index];
+    if (!name || !/^[A-Za-z0-9_-]{1,128}$/.test(value || "")) return false;
+    const excluded = excludedTemplateValues[name] || [];
+    return !excluded.includes(value);
+  });
+}
+
 function matchesRequiredSearchParams(url, target) {
   const rules = target.requiredSearchParams;
   if (!rules) return true;
@@ -31,9 +45,17 @@ export function isContributionUrlAllowed(config, value) {
   if (isReadOnlyPlatformPath(url.pathname)) return false;
   return (config.security.contributionTargets || []).some((target) => {
     if (url.origin !== target.origin) return false;
-    const prefixes = Array.isArray(target.pathPrefixes) ? target.pathPrefixes : ["/"];
+    const prefixes = Array.isArray(target.pathPrefixes) ? target.pathPrefixes : [];
+    const templates = Array.isArray(target.pathTemplates) ? target.pathTemplates : [];
     return (
-      prefixes.some((prefix) => matchesPathPrefix(url.pathname, prefix)) &&
+      (prefixes.some((prefix) => matchesPathPrefix(url.pathname, prefix)) ||
+        templates.some((template) =>
+          matchesPathTemplate(
+            url.pathname,
+            template,
+            target.excludedTemplateValues,
+          ),
+        )) &&
       matchesRequiredSearchParams(url, target)
     );
   });

@@ -21,7 +21,13 @@ const PLATFORM_REGISTRY = Object.freeze({
     contributionTargets: Object.freeze([
       Object.freeze({
         origin: "https://podcaster.xiaoyuzhoufm.com",
-        pathPrefixes: Object.freeze(["/"]),
+        // The /podcast root is an account/program collection. Program choice is
+        // human-only; agents may act only after the user enters one concrete
+        // podcast workspace. The episode drawer stays on that exact URL.
+        pathTemplates: Object.freeze(["/podcast/:podcastId"]),
+        excludedTemplateValues: Object.freeze({
+          podcastId: Object.freeze(["create", "new"]),
+        }),
       }),
     ]),
   }),
@@ -113,6 +119,38 @@ export const DEFAULT_PLATFORM_IDS = Object.freeze(
 );
 export { HUMAN_ONLY_ACTIONS, PLATFORM_BACKLOG, PLATFORM_REGISTRY };
 
+function cloneContributionTarget(target) {
+  return {
+    ...target,
+    ...(target.pathPrefixes
+      ? { pathPrefixes: [...target.pathPrefixes] }
+      : {}),
+    ...(target.pathTemplates
+      ? { pathTemplates: [...target.pathTemplates] }
+      : {}),
+    ...(target.excludedTemplateValues
+      ? {
+          excludedTemplateValues: Object.fromEntries(
+            Object.entries(target.excludedTemplateValues).map(([name, values]) => [
+              name,
+              [...values],
+            ]),
+          ),
+        }
+      : {}),
+    ...(target.requiredSearchParams
+      ? {
+          requiredSearchParams: Object.fromEntries(
+            Object.entries(target.requiredSearchParams).map(([name, values]) => [
+              name,
+              [...values],
+            ]),
+          ),
+        }
+      : {}),
+  };
+}
+
 export function contributionTargetsFor(platformIds = DEFAULT_PLATFORM_IDS) {
   const targets = [];
   for (const platformId of platformIds) {
@@ -121,21 +159,10 @@ export function contributionTargetsFor(platformIds = DEFAULT_PLATFORM_IDS) {
       throw new Error(`Unknown platform: ${platformId}`);
     }
     for (const target of platform.contributionTargets) {
-      targets.push({
+      targets.push(cloneContributionTarget({
         platform: platformId,
-        origin: target.origin,
-        pathPrefixes: [...target.pathPrefixes],
-        ...(target.requiredSearchParams
-          ? {
-              requiredSearchParams: Object.fromEntries(
-                Object.entries(target.requiredSearchParams).map(([name, values]) => [
-                  name,
-                  [...values],
-                ]),
-              ),
-            }
-          : {}),
-      });
+        ...target,
+      }));
     }
   }
   return targets;
@@ -148,11 +175,24 @@ export function mergeContributionTargets(existingTargets, platformIds) {
   );
   const merged = (existingTargets || [])
     .filter((target) => !authoritativeOrigins.has(target.origin))
-    .map((target) => ({
-      ...target,
-      pathPrefixes: [...(target.pathPrefixes || ["/"])],
-    }));
+    .map(cloneContributionTarget);
   return [...merged, ...authoritative];
+}
+
+// Security-critical registry tightenings must survive application upgrades
+// even when the user's local config predates the new boundary. This function
+// never enables a platform that the user removed; it only replaces an existing
+// Xiaoyuzhou origin-wide target with the authoritative selected-program target.
+export function hardenLegacyContributionTargets(existingTargets) {
+  const targets = existingTargets || [];
+  const origin = "https://podcaster.xiaoyuzhoufm.com";
+  if (!targets.some((target) => target.origin === origin)) {
+    return targets.map(cloneContributionTarget);
+  }
+  const preserved = targets
+    .filter((target) => target.origin !== origin)
+    .map(cloneContributionTarget);
+  return [...preserved, ...contributionTargetsFor(["xiaoyuzhou"])];
 }
 
 export function removeContributionTargets(existingTargets, platformIds) {

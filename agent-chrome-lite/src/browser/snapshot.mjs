@@ -48,6 +48,25 @@ function compactText(value, max = 500) {
   return String(value || "").replace(/\u0000/g, "").slice(0, max);
 }
 
+export function isKnownCollectionSurface(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.origin === "https://podcaster.xiaoyuzhoufm.com" &&
+      /^\/podcast\/?$/.test(url.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isXiaoyuzhouPodcastEntityLink(url) {
+  return (
+    url.origin === "https://podcaster.xiaoyuzhoufm.com" &&
+    /^\/podcast\/[A-Za-z0-9_-]+\/?$/.test(url.pathname)
+  );
+}
+
 function descendantText(node, nodesById) {
   const pending = [...(node.childIds || [])];
   let visited = 0;
@@ -81,6 +100,7 @@ export function isReadOnlyLink(control, pageUrl) {
     const page = new URL(pageUrl);
     if (href.origin !== page.origin) return true;
     if (isReadOnlyPlatformPath(href.pathname)) return true;
+    if (isXiaoyuzhouPodcastEntityLink(href)) return true;
   } catch {
     return true;
   }
@@ -139,6 +159,23 @@ export class SnapshotStore {
   }
 
   async capture(cdp, { title, url }) {
+    if (isKnownCollectionSurface(url)) {
+      const epoch = randomUUID().slice(0, 8);
+      this.epoch = epoch;
+      this.refs = new Map();
+      return {
+        snapshotId: epoch,
+        title,
+        url,
+        controls: [],
+        hints: [],
+        limits: {
+          controls: this.maxControls,
+          hints: this.maxHints,
+          collectionMode: "contribution-only",
+        },
+      };
+    }
     const { nodes = [] } = await cdp.send("Accessibility.getFullAXTree");
     const nodesById = new Map(nodes.map((node) => [node.nodeId, node]));
     const epoch = randomUUID().slice(0, 8);
