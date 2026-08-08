@@ -121,7 +121,7 @@ test("empty rich editor does not report its placeholder as authored content", as
           tag: "div",
           contentEditable: true,
           placeholder: "从这里开始写正文",
-          value: "",
+          value: "从这里开始写正文\n\n",
           visible: true,
         },
       },
