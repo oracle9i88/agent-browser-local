@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { AuditLog } from "./audit.mjs";
 import { BrowserController } from "./browser/controller.mjs";
+import { ContributionPopupRouter } from "./browser/popup-router.mjs";
 import {
   assertNoElectronBrand,
   buildChromiumUserAgent,
@@ -39,6 +40,7 @@ let controller;
 let api;
 let egressPolicy;
 let daemonReady = false;
+let popupRouter;
 
 function startupErrorMessage(error) {
   if (error?.code === "EADDRINUSE") {
@@ -50,22 +52,31 @@ function startupErrorMessage(error) {
 function hardenUntrustedWebContents(webContents) {
   webContents.setUserAgent(browserUserAgent);
   egressPolicy.register(webContents);
-  webContents.setWindowOpenHandler(() => ({
-    action: "allow",
-    overrideBrowserWindowOptions: {
-      autoHideMenuBar: true,
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        webSecurity: true,
-        allowRunningInsecureContent: false,
-        safeDialogs: true,
+  webContents.setWindowOpenHandler(({ url }) => {
+    if (popupRouter?.route(url)) return { action: "deny" };
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        autoHideMenuBar: true,
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          webSecurity: true,
+          allowRunningInsecureContent: false,
+          safeDialogs: true,
+        },
       },
-    },
-  }));
+    };
+  });
   webContents.on("did-create-window", (childWindow) => {
     hardenUntrustedWebContents(childWindow.webContents);
+    const routeChild = (event, url) => {
+      if (!popupRouter?.route(url, { close: () => childWindow.close() })) return;
+      event?.preventDefault?.();
+    };
+    childWindow.webContents.on("will-navigate", routeChild);
+    childWindow.webContents.on("did-navigate", (event, url) => routeChild(event, url));
   });
 }
 
@@ -92,6 +103,26 @@ function runtimeState() {
   };
 }
 
+async function waitForToolbarChange(previousState) {
+  return mainWindow.webContents.executeJavaScript(
+    `new Promise((resolve) => {
+      const startedAt = Date.now();
+      const inspect = () => {
+        const result = {
+          state: document.querySelector("#agent-state")?.textContent || "",
+          handoffHidden: document.querySelector("#handoff")?.hidden
+        };
+        if (result.state !== ${JSON.stringify(previousState)} || Date.now() - startedAt >= 1000) {
+          resolve(result);
+          return;
+        }
+        setTimeout(inspect, 25);
+      };
+      inspect();
+    })`,
+  );
+}
+
 async function createWindow(config) {
   session.defaultSession.setUserAgent(
     browserUserAgent,
@@ -106,7 +137,7 @@ async function createWindow(config) {
     title: "Agent Browser Local",
     backgroundColor: "#111318",
     webPreferences: {
-      preload: path.join(sourceDir, "preload.mjs"),
+      preload: path.join(sourceDir, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -129,6 +160,16 @@ async function createWindow(config) {
   layoutContent();
 
   controller = new BrowserController(contentView.webContents, config);
+  popupRouter = new ContributionPopupRouter(config, {
+    navigate: (url) => controller.navigate(url),
+    onRouted: sendState,
+    onError: () => {
+      controller.setHandoff(
+        "投稿编辑器弹窗接回主窗口失败，自动化已冻结，等待用户决定。",
+        { code: "contribution_popup_route_failed" },
+      );
+    },
+  });
   egressPolicy = installNetworkEgressPolicy({
     browserSession: session.defaultSession,
     config,
@@ -152,9 +193,23 @@ async function createWindow(config) {
   controller.on("handoff", sendState);
 
   await mainWindow.loadFile(path.join(sourceDir, "ui", "index.html"));
+  const bridgeReady = await mainWindow.webContents.executeJavaScript(
+    "Boolean(window.agentBrowser && typeof window.agentBrowser.status === 'function' && typeof window.agentBrowser.clearHandoff === 'function')",
+  );
+  if (!bridgeReady) {
+    throw new Error("安全工具栏初始化失败：preload IPC bridge 不可用");
+  }
   await controller.initialize();
   await controller.navigate(config.browser.startUrl || "about:blank");
   sendState();
+  const expectedHandoff = Boolean(controller.status().handoff?.required);
+  const toolbarReady = await waitForToolbarChange("本地安全模式");
+  const expectedStateRendered = expectedHandoff
+    ? toolbarReady.state.startsWith("需要你接管：") && toolbarReady.handoffHidden === false
+    : toolbarReady.state === "本地 daemon 启动中" && toolbarReady.handoffHidden === true;
+  if (!expectedStateRendered) {
+    throw new Error("安全工具栏初始化失败：启动状态未渲染");
+  }
 
   if (process.env.ACL_DEVTOOLS === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -184,8 +239,8 @@ if (!singleInstance) {
   app.whenReady().then(async () => {
     try {
       const { config, configPath, tokens } = await loadConfig();
-      await createWindow(config);
       installIpc();
+      await createWindow(config);
 
       const executor = new HumanPacedExecutor({
         minDelayMs: config.security.minActionDelayMs,
@@ -194,9 +249,22 @@ if (!singleInstance) {
       const audit = new AuditLog(path.join(runtimeDir, "audit", "events.jsonl"));
       const daemon = new BrowserDaemon({ controller, config, executor, audit });
       api = createApiServer({ daemon, config, controller });
+      const toolbarBeforeReady = await mainWindow.webContents.executeJavaScript(
+        'document.querySelector("#agent-state")?.textContent || ""',
+      );
       await api.listen();
       daemonReady = true;
       sendState();
+      const toolbarRunning = await waitForToolbarChange(toolbarBeforeReady);
+      const runningHandoff = Boolean(controller.status().handoff?.required);
+      const runningStateRendered = runningHandoff
+        ? toolbarRunning.state.startsWith("需要你接管：") &&
+          toolbarRunning.handoffHidden === false
+        : toolbarRunning.state.includes(`v${VERSION}`) &&
+          toolbarRunning.handoffHidden === true;
+      if (!runningStateRendered) {
+        throw new Error("安全工具栏初始化失败：daemon 就绪状态未渲染");
+      }
 
       console.log(`Agent Browser Local listening on http://${config.server.host}:${config.server.port}`);
       console.log(`Config: ${configPath}`);
@@ -234,6 +302,7 @@ if (!singleInstance) {
 
 app.on("before-quit", async () => {
   daemonReady = false;
+  popupRouter = null;
   controller?.close();
   if (api) await api.close().catch(() => undefined);
 });
