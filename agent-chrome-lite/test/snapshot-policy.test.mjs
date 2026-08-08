@@ -299,11 +299,18 @@ test("upload rules remain hints instead of actionable upload refs", async () => 
           role: { value: "StaticText" },
           name: { value: "点击上传 或直接将视频文件拖入此区域" },
         },
+        {
+          nodeId: "annotation",
+          backendDOMNodeId: 114,
+          role: { value: "StaticText" },
+          name: { value: "选择视频标注" },
+        },
       ],
       {
         111: { tag: "span", visible: true },
         112: { tag: "span", visible: true },
         113: { tag: "span", visible: true },
+        114: { tag: "span", visible: true },
       },
     ),
     {
