@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  contributionScopeTransition,
   isExpectedNavigationAbort,
   waitForNavigationQuiet,
 } from "../src/browser/controller.mjs";
@@ -58,4 +59,50 @@ test("navigation settle fails closed after its bounded timeout", async () => {
   });
   assert.equal(settled, false);
   assert.equal(now, 500);
+});
+
+test("SPA transition into an allowed contribution page clears only outside-scope handoff", () => {
+  const config = {
+    security: {
+      contributionTargets: [
+        {
+          origin: "https://creator.douyin.com",
+          pathPrefixes: ["/creator-micro/content/upload"],
+        },
+      ],
+    },
+  };
+  const outside = {
+    required: true,
+    detail: { code: "outside_contribution_scope" },
+  };
+  const auth = {
+    required: true,
+    detail: { code: "manual_auth_surface_requires_handoff" },
+  };
+
+  assert.equal(
+    contributionScopeTransition(
+      config,
+      "https://creator.douyin.com/creator-micro/content/upload",
+      outside,
+    ),
+    "clear",
+  );
+  assert.equal(
+    contributionScopeTransition(
+      config,
+      "https://creator.douyin.com/creator-micro/content/upload",
+      auth,
+    ),
+    "unchanged",
+  );
+  assert.equal(
+    contributionScopeTransition(
+      config,
+      "https://creator.douyin.com/creator-micro/home",
+      null,
+    ),
+    "handoff",
+  );
 });

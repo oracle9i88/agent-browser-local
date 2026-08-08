@@ -263,6 +263,10 @@ test("ximalaya upload survives while management navigation is suppressed", () =>
     "创作学院",
     "音乐人",
     "推广资源管理",
+    "通知",
+    "活动管理",
+    "变现中心",
+    "创作中心",
   ]) {
     assert.equal(
       isReadOnlyControl({ role: "button", name }, pageUrl),
@@ -270,6 +274,53 @@ test("ximalaya upload survives while management navigation is suppressed", () =>
       name,
     );
   }
+});
+
+test("upload rules remain hints instead of actionable upload refs", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "rules",
+          backendDOMNodeId: 111,
+          role: { value: "StaticText" },
+          name: { value: "了解上传规则详情" },
+        },
+        {
+          nodeId: "size",
+          backendDOMNodeId: 112,
+          role: { value: "StaticText" },
+          name: { value: "视频时长60分钟以内，推荐上传mp4格式视频" },
+        },
+        {
+          nodeId: "action",
+          backendDOMNodeId: 113,
+          role: { value: "StaticText" },
+          name: { value: "点击上传 或直接将视频文件拖入此区域" },
+        },
+      ],
+      {
+        111: { tag: "span", visible: true },
+        112: { tag: "span", visible: true },
+        113: { tag: "span", visible: true },
+      },
+    ),
+    {
+      title: "抖音创作者中心",
+      url: "https://creator.douyin.com/creator-micro/content/upload",
+    },
+  );
+
+  assert.deepEqual(
+    result.controls.map(({ role, name }) => ({ role, name })),
+    [
+      {
+        role: "upload",
+        name: "点击上传 或直接将视频文件拖入此区域",
+      },
+    ],
+  );
 });
 
 test("video-channel hints expose only contribution context", async () => {

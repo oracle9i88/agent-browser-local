@@ -27,10 +27,10 @@ const HINT_ROLES = new Set([
 ]);
 
 const RECORD_DATE = /(?:19|20)\d{2}[./-]\d{1,2}[./-]\d{1,2}/;
-const UPLOAD_HINT = /upload|choose\s+(?:a\s+)?file|select\s+(?:a\s+)?file|上传(?:音频|文件|封面)?|选择(?:音频|文件|封面)/i;
+const UPLOAD_HINT = /^(?:click\s+to\s+)?upload(?:\s+(?:audio|video|file|cover))?$|choose\s+(?:a\s+)?file|select\s+(?:a\s+)?file|^(?:点击)?上传(?:音频|视频|文件|封面)?$|点击上传|拖(?:拽|入).*(?:上传|选择)|选择(?:音频|视频|文件|封面)/i;
 const EDITOR_HINT = /show\s*notes|description|body|editor|notes|简介|正文|内容|说明|编辑/i;
 const SEMANTIC_EDIT_HINT = /title|headline|show\s*notes|description|body|editor|notes|(?:请输入|输入|填写|写).*标题|(?:开始写|输入|编辑).*正文/i;
-const READ_ONLY_CONTROL_NAME = /(?:^|\s)(?:dashboard|analytics|insights|statistics|stats|comments?|messages?|notifications?|subscribers?|followers?|fans?|earnings?|revenue|income|help(?:\s+center)?|customer\s+service|account(?:\s+settings)?|profile|home)(?:\s|$)|^(?:首页|主页|消息|在线客服|帮助中心|问题咨询|个人信息|设置|通知中心|草稿箱|成长中心|创作服务|其他服务|活动中心|数据概览|作品分析|直播数据|粉丝分析|创作灵感|热点榜单|创作学院|音乐人|推广资源管理)$|内容管理|互动管理|数据中心|数据分析|直播管理|视频管理|我的作品|创作收益|收入与服务|带货中心|作品推广|创作成长|创作实验室|账号服务|专辑分类|定时发布|关于腾讯|运营规范/i;
+const READ_ONLY_CONTROL_NAME = /(?:^|\s)(?:dashboard|analytics|insights|statistics|stats|comments?|messages?|notifications?|subscribers?|followers?|fans?|earnings?|revenue|income|help(?:\s+center)?|customer\s+service|account(?:\s+settings)?|profile|home)(?:\s|$)|^(?:首页|主页|消息|通知|在线客服|帮助中心|问题咨询|个人信息|设置|通知中心|草稿箱|成长中心|创作服务|其他服务|活动中心|活动管理|变现中心|创作中心|数据概览|作品分析|直播数据|粉丝分析|创作灵感|热点榜单|创作学院|音乐人|推广资源管理)$|内容管理|互动管理|数据中心|数据分析|直播管理|视频管理|我的作品|创作收益|收入与服务|带货中心|作品推广|创作成长|创作实验室|账号服务|专辑分类|定时发布|关于腾讯|运营规范/i;
 const CONTRIBUTION_HINT = /upload|choose\s+(?:a\s+)?file|select\s+(?:a\s+)?file|title|description|show\s*notes|body|editor|notes|cover|agreement|publish|submit|schedule|draft|preview|link|location|collection|original|tags?|topics?|标题|描述|简介|正文|说明|编辑|上传|选择文件|封面|协议|创建单集|链接|声明原创|原创|标注|位置|合集|活动|定时|不定时|话题|添加描述|保存草稿|手机预览|发表|视频|图文|音乐|音频/i;
 
 function axValue(value) {

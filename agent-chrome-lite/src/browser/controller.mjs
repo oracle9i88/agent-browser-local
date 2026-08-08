@@ -38,6 +38,12 @@ export function isExpectedNavigationAbort(error) {
   );
 }
 
+export function contributionScopeTransition(config, url, handoff) {
+  if (!isContributionUrlAllowed(config, url)) return "handoff";
+  if (handoff?.detail?.code === "outside_contribution_scope") return "clear";
+  return "unchanged";
+}
+
 function normalizeUrl(input, { allowFileUrls = false } = {}) {
   const raw = String(input || "").trim();
   if (raw === "about:blank") return raw;
@@ -89,20 +95,30 @@ export class BrowserController extends EventEmitter {
     this.handoff = null;
     this.lastNavigationActivityAt = Date.now();
 
-    webContents.on("did-navigate", (_event, url) => {
-      this.lastNavigationActivityAt = Date.now();
-      this.invalidate();
-      if (!isContributionUrlAllowed(this.config, url)) {
+    const reconcileContributionScope = (url) => {
+      const transition = contributionScopeTransition(
+        this.config,
+        url,
+        this.handoff,
+      );
+      if (transition === "handoff") {
         this.setHandoff("当前页面需要用户本人完成登录、验证或人工导航。", {
           code: "outside_contribution_scope",
         });
-      } else if (this.handoff?.detail?.code === "outside_contribution_scope") {
+      } else if (transition === "clear") {
         this.clearHandoff();
       }
-    });
-    webContents.on("did-navigate-in-page", () => {
+    };
+
+    webContents.on("did-navigate", (_event, url) => {
       this.lastNavigationActivityAt = Date.now();
       this.invalidate();
+      reconcileContributionScope(url);
+    });
+    webContents.on("did-navigate-in-page", (_event, url) => {
+      this.lastNavigationActivityAt = Date.now();
+      this.invalidate();
+      reconcileContributionScope(url);
     });
     webContents.on("dom-ready", () => {
       this.lastNavigationActivityAt = Date.now();
