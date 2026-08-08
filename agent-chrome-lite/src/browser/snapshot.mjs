@@ -229,7 +229,28 @@ export class SnapshotStore {
           node.backendDOMNodeId,
           semanticName,
         ).catch(() => null);
-        if (!candidate?.backendNodeId || candidate.metadata?.visible === false) continue;
+        if (!candidate?.backendNodeId) {
+          const metadata = await readNodeMetadata(
+            cdp,
+            node.backendDOMNodeId,
+          ).catch(() => ({}));
+          if (metadata.visible === false) continue;
+          const ref = `${epoch}:${controls.length + 1}`;
+          const control = {
+            ref,
+            role: "editor_activation",
+            name: semanticName,
+            value: "",
+            disabled: Boolean(metadata.disabled),
+            ...metadata,
+          };
+          delete control.visible;
+          controls.push(control);
+          refs.set(ref, { backendNodeId: node.backendDOMNodeId, node: control });
+          if (controls.length >= this.maxControls) break;
+          continue;
+        }
+        if (candidate.metadata?.visible === false) continue;
         if (
           [...refs.values()].some(
             (entry) => entry.backendNodeId === candidate.backendNodeId,
@@ -239,6 +260,8 @@ export class SnapshotStore {
         }
         const ref = `${epoch}:${controls.length + 1}`;
         const metadata = candidate.metadata || {};
+        const normalizedValue = String(metadata.value || "").replace(/\s+/g, "");
+        const normalizedSemanticName = semanticName.replace(/\s+/g, "");
         const control = {
           ref,
           role: metadata.role || "textbox",
@@ -247,7 +270,12 @@ export class SnapshotStore {
             metadata.placeholder ||
             metadata.title ||
             semanticName,
-          value: compactText(metadata.value, 500),
+          value: compactText(
+            metadata.contentEditable && normalizedValue === normalizedSemanticName
+              ? ""
+              : metadata.value,
+            500,
+          ),
           disabled: Boolean(metadata.disabled),
           checked:
             typeof metadata.checked === "boolean" ? metadata.checked : undefined,

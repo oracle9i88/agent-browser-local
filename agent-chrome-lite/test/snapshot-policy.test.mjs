@@ -137,6 +137,34 @@ test("empty rich editor does not report its placeholder as authored content", as
   assert.equal(result.controls[0].value, "");
 });
 
+test("unfocused semantic editor remains discoverable as an activation ref", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "title-hint",
+          backendDOMNodeId: 71,
+          role: { value: "StaticText" },
+          name: { value: "请在这里输入标题" },
+        },
+      ],
+      {
+        71: { tag: "div", visible: true },
+      },
+    ),
+    {
+      title: "公众号",
+      url: "https://mp.weixin.qq.com/cgi-bin/appmsg?action=edit",
+    },
+  );
+
+  assert.equal(result.controls.length, 1);
+  assert.equal(result.controls[0].role, "editor_activation");
+  assert.equal(result.controls[0].name, "请在这里输入标题");
+  assert.equal(store.resolve(result.controls[0].ref).backendNodeId, 71);
+});
+
 test("ximalaya upload survives while management navigation is suppressed", () => {
   const pageUrl = "https://studio.ximalaya.com/upload";
   assert.equal(
