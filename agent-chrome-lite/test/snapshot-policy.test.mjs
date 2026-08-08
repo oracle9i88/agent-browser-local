@@ -330,6 +330,57 @@ test("upload rules remain hints instead of actionable upload refs", async () => 
   );
 });
 
+test("clickable upload dropzones are promoted to verified semantic upload refs", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [
+        {
+          nodeId: "dropzone",
+          backendDOMNodeId: 121,
+          role: { value: "button" },
+          name: {
+            value: "上传时长8小时内，大小不超过20GB，格式为MP4/H.264格式",
+          },
+        },
+        {
+          nodeId: "upload-video",
+          backendDOMNodeId: 122,
+          role: { value: "button" },
+          name: { value: "上传视频" },
+        },
+        {
+          nodeId: "publish",
+          backendDOMNodeId: 123,
+          role: { value: "button" },
+          name: { value: "发表" },
+        },
+      ],
+      {
+        121: { tag: "span", type: "", visible: true },
+        122: { tag: "button", type: "button", visible: true },
+        123: { tag: "button", type: "button", visible: true },
+      },
+    ),
+    {
+      title: "视频号助手",
+      url: "https://channels.weixin.qq.com/platform/post/create",
+    },
+  );
+
+  assert.deepEqual(
+    result.controls.map(({ role, name }) => ({ role, name })),
+    [
+      {
+        role: "upload",
+        name: "上传时长8小时内，大小不超过20GB，格式为MP4/H.264格式",
+      },
+      { role: "upload", name: "上传视频" },
+      { role: "button", name: "发表" },
+    ],
+  );
+});
+
 test("video-channel hints expose only contribution context", async () => {
   for (const text of [
     "申政",
