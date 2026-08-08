@@ -19,6 +19,7 @@
 - UI 显示 daemon 启动状态和当前版本；页面故障时提供仅由用户点击的“恢复页面”按钮。
 - 打包验收使用临时 Profile、随机回环端口、隐藏窗口和 `about:blank`；四个 principal 均存在，第二实例正确退出，验收后无残留进程。
 - 每次打包生成 `release-manifest.json`，记录 ZIP 大小与 SHA-256；打包验收会先重新计算并核对清单。
+- 新增 `npm run doctor` 只读体检：不读取 token 内容、不启动浏览器，检查配置/token 权限、Profile、daemon 安全绑定和打包产物哈希。
 
 ## 产物
 

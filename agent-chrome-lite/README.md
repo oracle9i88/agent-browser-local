@@ -55,6 +55,14 @@ npm run test:packaged
 
 `test:packaged` 使用 `/tmp` 临时 Profile、随机 loopback 端口和 `about:blank` 启动隐藏应用；随后启动第二份验证单实例锁，再检查四个固定 principal。它不读取正式 Profile，也不打开账号页面。
 
+无需启动浏览器即可运行本机体检：
+
+```bash
+npm run doctor
+```
+
+体检只读取配置元数据，不读取 token 内容；它检查配置/token 权限、Profile 是否存在、daemon 是否安全监听，以及 `.app`、ZIP 和发布清单哈希是否一致。daemon 未运行会如实显示，但不会因此启动它。
+
 首次启动会创建：
 
 - 配置：`~/.agent-browser-local/config.json`
