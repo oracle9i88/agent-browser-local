@@ -29,6 +29,8 @@
 
 以上 `dist/` 产物不纳入 Git，可由 `npm run package:mac` 重建。当前为本机自用的 ad-hoc 签名版本，尚未进行 Apple Developer ID 签名与公证。
 
+小宇宙边界修复后的最新归档 SHA-256 为 `b4418f1f423bdc7cefe5c5ea7e67f0c0377f2ce5ef59859b7aa69ba137bbbbcb`。对该归档解出的原物执行 packaged smoke 已通过：单实例、Codex/Claude/NovaGe/NovaDe 四 principal、临时 Profile、不打开账号页、release manifest 哈希核对均为真。正式 App 随后从 `about:blank` 启动，loopback health 正常；持久配置已迁移为小宇宙具体节目路径模板，未再保留整站 `/` 权限。
+
 ## 网易云音乐边界
 
 网易云音乐已进入代码中的 `PLATFORM_BACKLOG`。由于当前有另一位操作者正在真实提交，本次未打开、刷新、登录或探测网易云页面，也未把未经核验的路径写入 contribution allowlist。对方完成并明确交接后，才执行官方入口核验、Snapshot 验收与最终人工发布门配置。
