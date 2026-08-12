@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <title>Agent Browser Local</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="toolbar">
+      <div class="brand" title="独立 Profile · 本地 daemon · contribution-only">
+        <span class="brand-mark">A</span>
+        <span>Agent Browser</span>
+      </div>
+      <nav class="nav" aria-label="浏览器导航">
+        <button id="back" type="button" aria-label="后退">←</button>
+        <button id="forward" type="button" aria-label="前进">→</button>
+        <button id="reload" type="button" aria-label="刷新">↻</button>
+      </nav>
+      <form id="address-form" class="address-form">
+        <span id="security-dot" class="security-dot" aria-hidden="true"></span>
+        <input id="address" aria-label="地址" autocomplete="off" spellcheck="false" />
+      </form>
+      <div id="agent-state" class="agent-state">本地安全模式</div>
+      <button id="recovery" class="recovery" type="button" hidden>恢复页面</button>
+      <button id="handoff" class="handoff" type="button" disabled>Agent 未就绪</button>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

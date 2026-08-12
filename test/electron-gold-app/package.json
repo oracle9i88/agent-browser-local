@@ -1,0 +1,6 @@
+{
+  "name": "agent-browser-upload-gold",
+  "private": true,
+  "type": "module",
+  "main": "../../scripts/electron-upload-gold.mjs"
+}
