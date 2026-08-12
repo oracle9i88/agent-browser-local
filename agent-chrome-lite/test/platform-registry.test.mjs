@@ -146,11 +146,11 @@ test("suno stays defined but disabled by default and can be removed locally", ()
   );
 });
 
-test("netease cloud music is recorded without touching the active publisher", () => {
+test("netease cloud music stays disabled pending official entry validation", () => {
   assert.equal(DEFAULT_PLATFORM_IDS.includes("netease_cloud_music"), false);
   assert.equal(
     PLATFORM_BACKLOG.netease_cloud_music.status,
-    "awaiting_active_publisher_handoff",
+    "pending_official_entry_validation",
   );
   assert.throws(
     () => contributionTargetsFor(["netease_cloud_music"]),

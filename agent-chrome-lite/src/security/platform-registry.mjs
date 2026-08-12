@@ -9,9 +9,9 @@ const HUMAN_ONLY_ACTIONS = Object.freeze([
 const PLATFORM_BACKLOG = Object.freeze({
   netease_cloud_music: Object.freeze({
     label: "网易云音乐",
-    status: "awaiting_active_publisher_handoff",
+    status: "pending_official_entry_validation",
     requirement:
-      "当前有其他操作者正在真实提交；交接完成后再核验官方创作者入口与登录跳转，核验前不得写入 allowlist。",
+      "正式启用前必须核验官方创作者入口、登录跳转和最终人工发布门；核验前不得写入 allowlist。",
   }),
 });
 

@@ -19,7 +19,9 @@ const projectDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const packageJson = JSON.parse(
   await readFile(path.join(projectDir, "package.json"), "utf8"),
 );
+const bundleVersion = packageJson.version.split("-")[0];
 const productName = "Agent Browser Local";
+const bundleId = "app.agentbrowser.local";
 const bundleName = `${productName}.app`;
 const sourceApp = path.join(
   projectDir,
@@ -132,11 +134,11 @@ const plistBuddy = "/usr/libexec/PlistBuddy";
 const plistValues = [
   ["CFBundleDisplayName", productName],
   ["CFBundleExecutable", productName],
-  ["CFBundleIdentifier", "com.evanguo.agent-browser-local"],
+  ["CFBundleIdentifier", bundleId],
   ["CFBundleIconFile", "AgentBrowser.icns"],
   ["CFBundleName", productName],
-  ["CFBundleShortVersionString", packageJson.version],
-  ["CFBundleVersion", packageJson.version],
+  ["CFBundleShortVersionString", bundleVersion],
+  ["CFBundleVersion", bundleVersion],
   ["LSApplicationCategoryType", "public.app-category.productivity"],
 ];
 for (const [key, value] of plistValues) {
@@ -183,7 +185,7 @@ await writeFile(
     {
       product: productName,
       version: packageJson.version,
-      bundleId: "com.evanguo.agent-browser-local",
+      bundleId,
       archive: path.basename(outputArchive),
       archiveBytes: archiveInfo.size,
       archiveSha256,

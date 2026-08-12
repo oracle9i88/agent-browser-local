@@ -2,11 +2,13 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：P0 内核 `0.3.0`。
+当前版本：`v0.3.0-beta.1`（Public Preview）。
 
-平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留未来适配定义，按用户当前冻结指令默认不启用。
+平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
-网易云音乐已记录在 `PLATFORM_BACKLOG`，但当前另有操作者正在真实提交，因此尚未进入 allowlist。必须等对方完成并明确交接，再核验官方创作者入口与登录跳转；在此之前本项目不打开、不刷新或操作网易云页面。
+网易云音乐已记录在 `PLATFORM_BACKLOG`，但尚未进入 allowlist。正式启用前必须核验官方创作者入口、登录跳转和最终人工发布门。
+
+> Beta 边界：浏览器内核、四 Agent 接入与安全门已经可运行；各平台上传后的二阶段表单仍在逐项验收。不要把本预览版当作无人值守发布器。
 
 ## 已实现
 
@@ -38,7 +40,9 @@
 ## 启动
 
 ```bash
-cd "/Users/evanguo/Documents/New project2/agent-chrome-lite"
+git clone https://github.com/oracle9i88/agent-browser-local.git
+cd agent-browser-local
+npm ci
 npm start
 ```
 
@@ -83,7 +87,7 @@ curl -H "Authorization: Bearer $ABL_TOKEN" \
 curl -X POST \
   -H "Authorization: Bearer $ABL_TOKEN" \
   -H 'content-type: application/json' \
-  --data '{"url":"https://podcaster.xiaoyuzhoufm.com"}' \
+  --data '{"url":"https://podcaster.xiaoyuzhoufm.com/podcast/YOUR_PODCAST_ID"}' \
   http://127.0.0.1:3767/v1/navigate
 
 curl -X POST \
@@ -104,8 +108,9 @@ WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: B
 Claude Code 与 Codex 使用同一个 stdio 入口：
 
 ```bash
+export PROJECT_DIR="/absolute/path/to/agent-browser-local"
 ABL_TOKEN='对应 principal 的 token' \
-node "/Users/evanguo/Documents/New project2/agent-chrome-lite/mcp/server.mjs"
+node "$PROJECT_DIR/mcp/server.mjs"
 ```
 
 工具只有：status、navigate、snapshot、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。没有发布或确认工具。
@@ -134,3 +139,12 @@ npm run platforms -- --list
 npm run platforms -- ximalaya
 npm run platforms -- --disable suno
 ```
+
+## 发布状态
+
+- Git tag：`v0.3.0-beta.1`
+- GitHub Release：Pre-release，仅发布源码。
+- 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
+- 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
+
+本仓库当前未声明开源许可证。公开可见不等于获得复制、修改或再分发授权；许可证将在稳定版前另行确定。
