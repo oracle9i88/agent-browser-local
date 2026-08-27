@@ -1,8 +1,20 @@
-# CHANGES：登录态迁移向导（Chrome → Agent）— 交付审计文档 v3
+# CHANGES：登录态迁移向导（Chrome → Agent）— 交付审计文档 v4
 
 > 实现方：GLM。分支 `glm/profile-migration`，基线 `4cedd9e`。
-> v3：修复第二轮审计的两个 P0 回滚问题，并采纳 WAL（pending → committed）建议。
+> v4：修复第三轮审计的 Cookie 覆盖冲突 P0（冲突即中止，不覆盖、不存旧值明文）。
 > 状态：**待 Codex 复审**。不自行合并、不推送、不宣布完成。
+
+## R3. 第三轮审计修复（P0：已有 Cookie 被覆盖后无法无损回滚）
+
+| 要求 | 实现 | 证据 |
+| --- | --- | --- |
+| 1. 注入前检测目标 Space 同名 Cookie | 新增 `findConflictingCookies()`：逐条 `cookieStore.get({name})` 后按域名重叠（双向后缀匹配）判定冲突；在 WAL 写入**之前**执行 | `profile-migrator.mjs` 步骤 1.5 |
+| 2. 冲突默认中止，不覆盖 | 任一冲突 → 抛 `migration_cookie_conflict`，整个迁移零注入（发生在任何 set() 和 WAL 记录之前）；冲突清单仅含 Cookie 名+域名，**不含任何值**，旧值明文不落 manifest | 测试 `"existing cookie conflicts abort the migration without overwriting"`：预置 OLD 值 → 迁移被拒 → OLD 原样保留、无其他注入、manifest 零记录 |
+| 3. UI 提示 | 错误消息直含指引：“Agent 中已有同名登录态（…），为避免覆盖丢失，本次未同步。请先回滚上次迁移或清理后再同步”；向导状态区原样展示 | 同上测试断言 |
+| 4. 回归测试 | 同上 + 跨域同名不误伤（`.other.example` 的 `__client` 不阻塞 suno.com 迁移） | 两条新测试 |
+| 5. 启动恢复只清理真正新增的 Cookie | 冲突守卫保证：凡进入 manifest/WAL 的 Cookie 必然是全新（无冲突）的，回滚/恢复的 remove 永远不会碰预存登录态；恢复测试新增无关预置 Cookie（`MUSIC_U`）断言其存活 | `"pending manifest entries are recovered on startup"` 更新 |
+
+安全边界确认：未采纳“旧 Cookie 明文写入 manifest”方案，与审计意见一致。
 
 ## R2. 第二轮审计修复（P0）
 
@@ -67,10 +79,10 @@ Cookie 元数据），统一包装为 `migration_inject_failed` 计数型错误�
 - #5 值只在主进程：摘要/manifest/错误仅含计数、域名、Cookie 名（`SECRET-…` 注入测试断言序列化不含值）；底层异常包装后上抛；
 - #8 回滚（WAL 语义）：pending 先行 → 每条 set 后立即登记账本 → 验证/提交失败自动回滚 → 回滚自身失败升级为 `migration_rollback_failed` 并留待启动恢复；显式回滚只动 manifest 列表。
 
-## 4. 实现方自测（v3 修复后）
+## 4. 实现方自测（v4 修复后）
 
 - `npm run check`：64 文件语法通过；
-- `npm test`：**98 tests，97 pass / 0 fail / 1 skipped**（本轮新增 5 项回滚回归测试）；
+- `npm test`：**100 tests，99 pass / 0 fail / 1 skipped**（本轮新增 3 项冲突守卫测试）；
 - 无头启动冒烟：daemon 监听、UI 初始化、Space partition 生成、自动退出正常。
 
 ## 5. 留给审计人的验收项（未变 + 新增）

@@ -283,6 +283,14 @@ test("pending manifest entries are recovered on startup", async () => {
     domain: ".suno.com",
     path: "/",
   });
+  // an unrelated pre-existing cookie that recovery must never touch
+  await cookieStore.set({
+    url: "https://music.163.com/",
+    name: "MUSIC_U",
+    value: "user-real-session",
+    domain: ".163.com",
+    path: "/",
+  });
   const document = await store.load();
   document.entries.push({
     id: "migration-crashed",
@@ -309,7 +317,15 @@ test("pending manifest entries are recovered on startup", async () => {
   assert.equal(summary.entries, 1);
   assert.equal(summary.removed, 1);
   assert.equal(summary.failed, 0);
-  assert.equal(cookieStore.jar.size, 0, "residue must be cleaned up");
+  assert.equal(cookieStore.jar.size, 1, "residue must be cleaned up");
+  const untouched = [...cookieStore.jar.values()].find(
+    (cookie) => cookie.name === "MUSIC_U",
+  );
+  assert.equal(
+    untouched?.value,
+    "user-real-session",
+    "recovery must only clean manifest-listed cookies, never unrelated ones",
+  );
   const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
   assert.equal(raw.entries[0].status, "rolled_back");
   assert.ok(raw.entries[0].recoveredAt);
@@ -386,6 +402,72 @@ test("manifest records the target space and rollback reports removedCount", asyn
   assert.equal(typeof rolledBack.removedCount, "number");
   assert.ok(rolledBack.removedCount > 0);
   assert.deepEqual(rolledBack.space, space);
+});
+
+test("existing cookie conflicts abort the migration without overwriting (round-3 P0)", async () => {
+  const { store, dir } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  // pre-existing login state that must never be overwritten
+  await cookieStore.set({
+    url: "https://suno.com/",
+    name: "__client",
+    value: "OLD-PRE-EXISTING",
+    domain: ".suno.com",
+    path: "/",
+  });
+
+  await assert.rejects(
+    () =>
+      runLoginMigration({
+        selectedDomains: ["suno.com"],
+        cookieStore,
+        manifestStore: store,
+        cdp: cdpFor(offer),
+      }),
+    (error) =>
+      error.code === "migration_cookie_conflict" &&
+      /已有同名登录态/.test(error.message) &&
+      /请先回滚上次迁移或清理后再同步/.test(error.message),
+  );
+
+  const survivor = [...cookieStore.jar.values()].find(
+    (cookie) => cookie.name === "__client",
+  );
+  assert.ok(survivor, "pre-existing cookie must survive");
+  assert.equal(survivor.value, "OLD-PRE-EXISTING", "old value must be intact");
+  assert.equal(cookieStore.jar.size, 1, "nothing else may be injected");
+  const raw = await readFile(path.join(dir, "manifest.json"), "utf8")
+    .then((text) => JSON.parse(text))
+    .catch((error) => {
+      if (error.code === "ENOENT") return { entries: [] }; // abort pre-write: no record at all
+      throw error;
+    });
+  assert.equal(raw.entries.length, 0, "abort must happen before the write-ahead record");
+});
+
+test("same cookie name on an unrelated domain is not a conflict", async () => {
+  const { store } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  await cookieStore.set({
+    url: "https://other.example/",
+    name: "__client",
+    value: "unrelated-site-session",
+    domain: ".other.example",
+    path: "/",
+  });
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  const summary = await runLoginMigration({
+    selectedDomains: ["suno.com"],
+    cookieStore,
+    manifestStore: store,
+    cdp: cdpFor(offer),
+  });
+  assert.equal(summary.platforms[0].verified, true);
+  const unrelated = [...cookieStore.jar.values()].find(
+    (cookie) => cookie.domain === ".other.example",
+  );
+  assert.equal(unrelated.value, "unrelated-site-session");
 });
 
 test("rollback removes exactly the manifest-listed cookies", async () => {

@@ -342,6 +342,37 @@ async function rollbackInjectedCookies(cookieStore, injectedCookies) {
 }
 
 /**
+ * Detect cookies already present in the agent space that would be overwritten
+ * by this migration (same name + overlapping domain). Cookie store set()
+ * replaces silently, and remove()-based rollback would then DESTROY the
+ * pre-existing login state — so conflicts must abort the migration before
+ * anything is injected. Only names/domains are ever reported, never values.
+ */
+async function findConflictingCookies(cookieStore, collected) {
+  const conflicts = [];
+  for (const item of collected) {
+    for (const cookie of item.cookies) {
+      let existing = [];
+      try {
+        existing = (await cookieStore.get({ name: cookie.name })) || [];
+      } catch {
+        existing =
+          (await cookieStore.get({ name: cookie.name, domain: cookie.domain })) || [];
+      }
+      const hit = (Array.isArray(existing) ? existing : []).find((candidate) => {
+        const a = normalizeDomain(candidate.domain);
+        const b = normalizeDomain(cookie.domain);
+        return hostMatchesDomain(a, b) || hostMatchesDomain(b, a);
+      });
+      if (hit) {
+        conflicts.push({ platform: item.platform, label: item.label, name: cookie.name, domain: normalizeDomain(cookie.domain) });
+      }
+    }
+  }
+  return conflicts;
+}
+
+/**
  * Run one user-initiated login-state migration.
  *
  * Write-ahead manifest: a `pending` entry (cookie names/domains/paths only,
@@ -383,6 +414,24 @@ export async function runLoginMigration({
       item.cookies = null;
     }
     throw error;
+  }
+
+  // 1.5 Destructive-overwrite guard: if the target space already holds a
+  // same-name cookie, abort BEFORE writing anything. Rollback removes
+  // cookies; it must never destroy pre-existing login state.
+  const conflicts = await findConflictingCookies(cookieStore, collected);
+  if (conflicts.length > 0) {
+    for (const item of collected) {
+      item.cookies = null;
+    }
+    const preview = conflicts
+      .slice(0, 5)
+      .map((conflict) => `${conflict.label}：${conflict.name}@${conflict.domain}`)
+      .join("；");
+    throw sanitizedError(
+      `迁移向导：Agent 中已有同名登录态（${preview}${conflicts.length > 5 ? " 等" : ""}），为避免覆盖丢失，本次未同步。请先回滚上次迁移或清理后再同步`,
+      "cookie_conflict",
+    );
   }
 
   // 2. Write-ahead: persist the pending manifest before any injection.
@@ -566,8 +615,10 @@ export async function rollbackLoginMigration({
 /**
  * Startup recovery: pending entries are either unfinished migrations or
  * migrations whose rollback did not fully complete. Remove every listed
- * cookie (removal is idempotent) and mark the entry recovered. Returns a
- * counts-only summary safe for logs.
+ * cookie (removal is idempotent) and mark the entry recovered. Entries only
+ * ever list cookies that passed the conflict guard (i.e. genuinely new
+ * cookies), so recovery can never destroy pre-existing login state.
+ * Returns a counts-only summary safe for logs.
  */
 export async function recoverPendingMigrations({
   cookieStore,
