@@ -11,12 +11,15 @@ import {
 /**
  * Login-state migration (Plan A, audited wording):
  *
- * The CDP session bridge does NOT read cookies that the user did not
- * explicitly authorize. For authorized domains it briefly handles cookie
- * plaintext values inside the Electron MAIN PROCESS only, then injects them
- * into the agent cookie store. Cookie values are never persisted, displayed,
- * logged, exported, sent to the renderer, the daemon API, audit logs or agent
- * snapshots, and are dropped as soon as injection finishes.
+ * The CDP session bridge reads cookies at URL scope
+ * (Network.getCookies{urls}). Chrome returns ALL cookies under those URLs,
+ * so cookies whose names are not on the platform whitelist DO briefly enter
+ * main-process memory; they are synchronously filtered on receipt and
+ * immediately dropped. Authorized cookie plaintext values are handled inside
+ * the Electron MAIN PROCESS only, then injected into the target agent space's
+ * cookie store. Cookie values are never persisted, displayed, logged,
+ * exported, sent to the renderer, the daemon API, audit logs or agent
+ * snapshots.
  */
 
 // Google identity domains must never be imported (hard deny, belt-and-braces
@@ -221,9 +224,11 @@ function defaultCdpAdapter(endpoint) {
 }
 
 /**
- * Pull cookies for one platform from the running Chrome instance over CDP,
- * already scoped to the user-selected domains (Network.getCookies{urls}),
- * then filtered again by the per-platform cookie-name whitelist.
+ * Pull cookies for one platform from the running Chrome instance over CDP.
+ * NOTE (honest scope): Network.getCookies{urls} returns every cookie under
+ * the selected URLs; non-whitelisted names briefly exist in main-process
+ * memory and are synchronously discarded in the loop below. Only
+ * whitelist-matching cookies are normalized and kept.
  * Returns { platform, domains, cookies } — cookies never leave this scope.
  */
 async function collectPlatformCookies(offer, domains, cdp) {
@@ -300,12 +305,15 @@ export function createManifestStore(manifestDir, { manifestName = "manifest.json
   return { load, save, manifestPath };
 }
 
-function buildManifestEntry({ id, at, results, sourceProfile }) {
+function buildManifestEntry({ id, at, results, sourceProfile, space }) {
   return {
     id,
     at,
     sourceProfile: sourceProfile ? String(sourceProfile) : "",
     plan: "login-state-cdp",
+    space: space && typeof space === "object"
+      ? { id: String(space.id || ""), partition: String(space.partition || "") }
+      : { id: "default", partition: "abl-space-default" },
     platforms: results.map((result) => ({
       platform: result.platform,
       label: result.label,
@@ -337,6 +345,7 @@ export async function runLoginMigration({
   endpoint = process.env.ABL_CHROME_CDP_URL || "http://127.0.0.1:9222",
   cookieStore,
   manifestStore,
+  space = null,
   cdp = defaultCdpAdapter(endpoint),
   sourceProfile = "",
   now = () => new Date().toISOString(),
@@ -392,10 +401,28 @@ export async function runLoginMigration({
     at: now(),
     results,
     sourceProfile,
+    space,
   });
-  const document = await manifestStore.load();
-  document.entries.push(entry);
-  await manifestStore.save(document);
+  const document_ = await manifestStore.load();
+  document_.entries.push(entry);
+  try {
+    await manifestStore.save(document_);
+  } catch (error) {
+    // Without a persisted manifest there is no rollback record, so the only
+    // safe outcome is a full rollback of everything injected (constraint 8).
+    await rollbackInjectedCookies(cookieStore, injectedCookies).catch(() => undefined);
+    for (const result of results) {
+      result.injectedCookies = null;
+    }
+    for (const item of collected) {
+      item.cookies = null;
+    }
+    injectedCookies.length = 0;
+    throw sanitizedError(
+      "迁移向导：迁移记录写入失败，已自动回滚本次同步的全部 Cookie",
+      "manifest_save_failed",
+    );
+  }
 
   // Drop all cookie material (constraint 6).
   for (const result of results) {
@@ -461,7 +488,8 @@ export async function rollbackLoginMigration({
   await manifestStore.save(document);
   return {
     id: entry.id,
-    removed,
+    removedCount: removed,
+    space: entry.space,
     platforms: entry.platforms.map((platform) => ({
       platform: platform.platform,
       label: platform.label,

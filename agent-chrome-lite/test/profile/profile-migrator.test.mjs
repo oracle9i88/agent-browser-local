@@ -213,6 +213,51 @@ test("post-sync verification failure triggers automatic rollback (constraint 8)"
   assert.equal(cookieStore.jar.size, 0, "injected cookies must be rolled back");
 });
 
+test("manifest save failure rolls back injected cookies (constraint 8)", async () => {
+  const cookieStore = makeCookieStore();
+  const failingStore = {
+    load: async () => ({ entries: [] }),
+    save: async () => {
+      throw new Error("disk full");
+    },
+  };
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  await assert.rejects(
+    () =>
+      runLoginMigration({
+        selectedDomains: ["suno.com"],
+        cookieStore,
+        manifestStore: failingStore,
+        cdp: cdpFor(offer),
+      }),
+    /已自动回滚/,
+  );
+  assert.equal(cookieStore.jar.size, 0, "no cookie may survive a failed manifest write");
+});
+
+test("manifest records the target space and rollback reports removedCount", async () => {
+  const { store, dir } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const suno = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  const space = { id: "default", partition: "abl-space-default" };
+
+  await runLoginMigration({
+    selectedDomains: ["suno.com"],
+    cookieStore,
+    manifestStore: store,
+    cdp: cdpFor(suno),
+    space,
+  });
+
+  const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.deepEqual(raw.entries[0].space, space);
+
+  const rolledBack = await rollbackLoginMigration({ cookieStore, manifestStore: store });
+  assert.equal(typeof rolledBack.removedCount, "number");
+  assert.ok(rolledBack.removedCount > 0);
+  assert.deepEqual(rolledBack.space, space);
+});
+
 test("rollback removes exactly the manifest-listed cookies", async () => {
   const { store } = await makeManifestStore();
   const cookieStore = makeCookieStore();
