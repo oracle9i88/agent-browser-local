@@ -23,6 +23,13 @@ import {
 import { defaultRuntimeDir, loadConfig } from "./config.mjs";
 import { VERSION } from "./constants.mjs";
 import { HumanPacedExecutor } from "./executor/human-paced.mjs";
+import { detectChromeProfiles } from "./profile/chrome-profile-detector.mjs";
+import {
+  createManifestStore,
+  listMigrationOffers,
+  rollbackLoginMigration,
+  runLoginMigration,
+} from "./profile/profile-migrator.mjs";
 import { BrowserDaemon } from "./server/daemon.mjs";
 import { createApiServer } from "./server/http-server.mjs";
 import { installNetworkEgressPolicy } from "./security/network-egress.mjs";
@@ -47,6 +54,7 @@ let daemonReady = false;
 let popupRouter;
 let pendingExternalAuth = null;
 let lastAutoOpenedExternalAuth = null;
+const migrationManifests = createManifestStore(path.join(runtimeDir, "migration"));
 
 function startupErrorMessage(error) {
   if (error?.code === "EADDRINUSE") {
@@ -355,6 +363,23 @@ function installIpc() {
     resetExternalAuthState();
     return controller.clearHandoff();
   });
+  // 迁移向导：仅由用户在 UI 中显式触发；daemon/Agent 没有任何调用路径。
+  ipcMain.handle("migration:detect", () => detectChromeProfiles());
+  ipcMain.handle("migration:offers", () => listMigrationOffers());
+  ipcMain.handle("migration:run", (_event, selectedDomains) =>
+    runLoginMigration({
+      selectedDomains,
+      cookieStore: session.defaultSession.cookies,
+      manifestStore: migrationManifests,
+    }),
+  );
+  ipcMain.handle("migration:rollback", (_event, migrationId) =>
+    rollbackLoginMigration({
+      migrationId: typeof migrationId === "string" ? migrationId : undefined,
+      cookieStore: session.defaultSession.cookies,
+      manifestStore: migrationManifests,
+    }),
+  );
 }
 
 if (!singleInstance) {

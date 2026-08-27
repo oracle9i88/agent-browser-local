@@ -10,6 +10,11 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   openExternalAuth: () => ipcRenderer.invoke("browser:open-external-auth"),
   syncExternalAuth: () => ipcRenderer.invoke("browser:sync-external-auth"),
   clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
+  migrationDetect: () => ipcRenderer.invoke("migration:detect"),
+  migrationOffers: () => ipcRenderer.invoke("migration:offers"),
+  migrationRun: (domains) => ipcRenderer.invoke("migration:run", domains),
+  migrationRollback: (migrationId) =>
+    ipcRenderer.invoke("migration:rollback", migrationId),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);
     ipcRenderer.on("browser:state", listener);

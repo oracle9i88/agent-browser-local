@@ -122,3 +122,151 @@ button:disabled { color: #666d79; }
   color: #ffb2b2;
   background: #2a1818;
 }
+
+/* ---- 迁移向导（Chrome → Agent 登录态迁移） ---- */
+
+.migration-toggle {
+  padding: 0 12px;
+  border-color: #2f5c44;
+  color: #9fe8c0;
+  background: #14231b;
+  font-size: 13px;
+}
+
+.migration-panel {
+  position: fixed;
+  top: 72px;
+  right: 14px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 400px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid #2b303a;
+  border-radius: 14px;
+  background: #15181e;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+}
+
+.migration-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.migration-title {
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.migration-close { font-size: 18px; }
+
+.migration-section-title {
+  margin: 6px 0;
+  color: #9ca6b7;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.migration-hint {
+  color: #8d96a6;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.migration-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 3px 0;
+}
+
+.migration-profile-name { color: #dde3ee; }
+
+.migration-badge {
+  padding: 1px 8px;
+  border: 1px solid #2f5c44;
+  border-radius: 99px;
+  color: #9fe8c0;
+  font-size: 11px;
+}
+
+.migration-offer {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #262b34;
+  border-radius: 10px;
+}
+
+.migration-offer-label {
+  margin-bottom: 4px;
+  color: #f0f3f9;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.migration-domain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 12px 3px 0;
+  color: #b9c1cf;
+  font-size: 12px;
+}
+
+.migration-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.migration-start {
+  padding: 0 14px;
+  border-color: #2f5c44;
+  color: #0a130e;
+  background: #77e2a8;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.migration-start:disabled {
+  background: #1f2620;
+  color: #666d79;
+}
+
+.migration-rollback {
+  padding: 0 12px;
+  border-color: #705a2c;
+  color: #ffdb8a;
+  background: #2a2417;
+  font-size: 13px;
+}
+
+.migration-status {
+  min-height: 16px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.migration-status[data-tone="ok"] { color: #9fe8c0; }
+.migration-status[data-tone="error"] { color: #ffb2b2; }
+.migration-status[data-tone="info"] { color: #9ca6b7; }
+
+.migration-result-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.migration-verify {
+  padding: 0 10px;
+  border-color: #353b46;
+  color: #dde3ee;
+  font-size: 12px;
+}
