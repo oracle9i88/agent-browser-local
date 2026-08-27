@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
   migrationDetect: () => ipcRenderer.invoke("migration:detect"),
   migrationOffers: () => ipcRenderer.invoke("migration:offers"),
+  migrationSpaces: () => ipcRenderer.invoke("migration:spaces"),
   migrationRun: (domains) => ipcRenderer.invoke("migration:run", domains),
   migrationRollback: (migrationId) =>
     ipcRenderer.invoke("migration:rollback", migrationId),

@@ -15,6 +15,8 @@
 
   let offers = [];
   let panel = null;
+  let status = null;
+  let results = null;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -129,8 +131,9 @@
     const domains = selectedDomains();
     if (domains.length === 0) return;
     const confirmed = window.confirm(
-      `将把勾选的 ${domains.length} 个域名的会话 Cookie 从 Chrome 同步到 Agent Browser。\n` +
-        "Cookie 明文只在本地主进程内存中短暂处理，不保存、不上传、不展示。\n继续同步？",
+      `将把勾选的 ${domains.length} 个域名的会话 Cookie 从 Chrome 同步到 Agent Space。\n` +
+        "CDP 按 URL 范围读取；白名单外名称的 Cookie 会被立即过滤丢弃。\n" +
+        "授权 Cookie 明文只在本地主进程内存中短暂处理，不保存、不上传、不展示。\n继续同步？",
     );
     if (!confirmed) return;
     setStatus(statusNode, "正在同步…", "info");
@@ -154,7 +157,7 @@
     }
   }
 
-  function buildPanel() {
+  async function buildPanel() {
     panel = el("div", "migration-panel");
     panel.id = "migration-panel";
     panel.hidden = true;
@@ -173,15 +176,31 @@
       el(
         "div",
         "migration-hint",
-        "只同步你在下方明确勾选域名的会话 Cookie；Google 身份域永远禁止导入。Agent 不会自行决定域名或权限。",
+        "只同步你在下方明确勾选域名的会话 Cookie；Google 身份域永远禁止导入。" +
+          "CDP 按 URL 范围读取，白名单外名称的 Cookie 会在主进程内存中被立即过滤丢弃；" +
+          "授权 Cookie 明文只在本地主进程内存中短暂处理，不保存、不上传、不展示。" +
+          "Agent 不会自行决定域名或权限。",
       ),
     );
 
     const profilesContainer = el("div");
     panel.append(profilesContainer);
 
-    renderOffers(panel);
+    const offersContainer = el("div", "migration-offers");
+    offersContainer.append(el("div", "migration-section-title", "平台域名（逐域勾选，默认全不选）"));
+    panel.append(offersContainer);
+    panel.append(actionsEl());
+    panel.append(statusEl());
+    panel.append(resultsContainerEl());
 
+    panel.insertBefore(profilesContainer, offersContainer);
+    renderProfiles(profilesContainer);
+    await renderOfferList(offersContainer);
+
+    document.body.append(panel);
+  }
+
+  function actionsEl() {
     const actions = el("div", "migration-actions");
     const start = button("migration-start", "开始同步");
     start.id = "migration-start";
@@ -191,19 +210,29 @@
     const rollbackButton = button("migration-rollback", "回滚最近一次迁移");
     rollbackButton.addEventListener("click", () => rollback(status));
     actions.append(rollbackButton);
-    panel.append(actions);
+    return actions;
+  }
 
-    const status = el("div", "migration-status");
-    panel.append(status);
+  function statusEl() {
+    status = el("div", "migration-status");
+    return status;
+  }
 
-    const results = el("div");
-    panel.append(results);
+  function resultsContainerEl() {
+    results = el("div");
+    return results;
+  }
 
-    const offersContainer = panel.querySelector(".migration-offers");
-    panel.insertBefore(profilesContainer, offersContainer);
-    renderProfiles(profilesContainer);
-
-    document.body.append(panel);
+  async function renderOfferList(container) {
+    try {
+      offers = await bridge.migrationOffers();
+    } catch (error) {
+      container.append(
+        el("div", "migration-warning", `平台列表加载失败：${String(error?.message || error)}`),
+      );
+      return;
+    }
+    renderOffers(container);
   }
 
   function buildToggleButton() {
