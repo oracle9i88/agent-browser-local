@@ -29,6 +29,7 @@ import { detectChromeProfiles } from "./profile/chrome-profile-detector.mjs";
 import {
   createManifestStore,
   listMigrationOffers,
+  recoverPendingMigrations,
   rollbackLoginMigration,
   runLoginMigration,
 } from "./profile/profile-migrator.mjs";
@@ -415,6 +416,22 @@ if (!singleInstance) {
       defaultSpace = await spaceManager.getSpace(DEFAULT_SPACE_ID);
       browsingSession = spaceManager.sessionFor(defaultSpace);
       tabOwnership = createTabOwnership({ defaultSpaceId: defaultSpace.id });
+      // 启动恢复：清理崩溃/回滚失败残留的待清理 Cookie（仅 manifest 列出的条目）。
+      try {
+        const recovery = await recoverPendingMigrations({
+          cookieStore: browsingSession.cookies,
+          manifestStore: migrationManifests,
+        });
+        if (recovery.entries > 0) {
+          console.warn(
+            `Migration recovery: ${recovery.entries} pending record(s), removed ${recovery.removed}, failed ${recovery.failed}`,
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `Migration recovery failed: ${String(error?.message || error).slice(0, 200)}`,
+        );
+      }
       installIpc();
       await createWindow(config);
 

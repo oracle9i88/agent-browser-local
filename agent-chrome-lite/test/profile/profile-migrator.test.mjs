@@ -191,7 +191,7 @@ test("pre-sync verification fails when the platform tab is not open in chrome", 
 });
 
 test("post-sync verification failure triggers automatic rollback (constraint 8)", async () => {
-  const { store } = await makeManifestStore();
+  const { store, dir } = await makeManifestStore();
   const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
   const cookieStore = makeCookieStore();
   // a store whose get() always returns empty → postcheck always fails
@@ -208,12 +208,142 @@ test("post-sync verification failure triggers automatic rollback (constraint 8)"
         manifestStore: store,
         cdp: cdpFor(offer),
       }),
-    /已自动回滚/,
+    /同步后验证未通过/,
   );
   assert.equal(cookieStore.jar.size, 0, "injected cookies must be rolled back");
+  const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(raw.entries[0].status, "rolled_back");
 });
 
-test("manifest save failure rolls back injected cookies (constraint 8)", async () => {
+test("mid-injection failure rolls back earlier cookies of the same platform", async () => {
+  const { store, dir } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  let setCalls = 0;
+  const flakyStore = {
+    set: async (cookie) => {
+      setCalls += 1;
+      if (setCalls === 2) throw new Error("injected store broke");
+      await cookieStore.set(cookie);
+    },
+    get: cookieStore.get.bind(cookieStore),
+    remove: cookieStore.remove.bind(cookieStore),
+  };
+  await assert.rejects(
+    () =>
+      runLoginMigration({
+        selectedDomains: ["suno.com"],
+        cookieStore: flakyStore,
+        manifestStore: store,
+        cdp: cdpFor(offer),
+      }),
+    /同步/,
+  );
+  assert.equal(setCalls, 2);
+  assert.equal(cookieStore.jar.size, 0, "the first injected cookie must not survive");
+  const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(raw.entries[0].status, "rolled_back");
+});
+
+test("rollback failure is escalated, not swallowed; entry flagged for recovery", async () => {
+  const { store, dir } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  const removeBrokeStore = {
+    set: cookieStore.set.bind(cookieStore),
+    get: async () => [],
+    remove: async () => {
+      throw new Error("store locked");
+    },
+  };
+  await assert.rejects(
+    () =>
+      runLoginMigration({
+        selectedDomains: ["suno.com"],
+        cookieStore: removeBrokeStore,
+        manifestStore: store,
+        cdp: cdpFor(offer),
+      }),
+    (error) => error.code === "migration_rollback_failed" && /回滚未完全完成/.test(error.message),
+  );
+  assert.equal(cookieStore.jar.size, offer.requiredCookieNames.length, "residual cookies must be reported honestly");
+  const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(raw.entries[0].rollbackFailed, true);
+  assert.equal(raw.entries[0].status, "pending");
+});
+
+test("pending manifest entries are recovered on startup", async () => {
+  const { store, dir } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  // seed a residue cookie left by a crashed migration, plus a pending record
+  await cookieStore.set({
+    url: "https://suno.com/",
+    name: "__session",
+    value: "residue",
+    domain: ".suno.com",
+    path: "/",
+  });
+  const document = await store.load();
+  document.entries.push({
+    id: "migration-crashed",
+    at: "2026-01-01T00:00:00.000Z",
+    status: "pending",
+    rollbackFailed: true,
+    space: { id: "default", partition: "abl-space-default" },
+    platforms: [
+      {
+        platform: "suno",
+        label: "Suno",
+        domains: ["suno.com"],
+        cookies: [{ name: "__session", domain: ".suno.com", path: "/" }],
+      },
+    ],
+  });
+  await store.save(document);
+
+  const { recoverPendingMigrations } = await import("../../src/profile/profile-migrator.mjs");
+  const summary = await recoverPendingMigrations({
+    cookieStore,
+    manifestStore: store,
+  });
+  assert.equal(summary.entries, 1);
+  assert.equal(summary.removed, 1);
+  assert.equal(summary.failed, 0);
+  assert.equal(cookieStore.jar.size, 0, "residue must be cleaned up");
+  const raw = JSON.parse(await readFile(path.join(dir, "manifest.json"), "utf8"));
+  assert.equal(raw.entries[0].status, "rolled_back");
+  assert.ok(raw.entries[0].recoveredAt);
+});
+
+test("committed manifest save failure rolls everything back (constraint 8)", async () => {
+  const real = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const offer = MIGRATION_PLATFORM_OFFERS.find((candidate) => candidate.platform === "suno");
+  let saveCalls = 0;
+  const flakySaveStore = {
+    load: real.store.load,
+    save: async (doc) => {
+      saveCalls += 1;
+      if (saveCalls === 2) throw new Error("disk full on commit");
+      return real.store.save(doc);
+    },
+  };
+  await assert.rejects(
+    () =>
+      runLoginMigration({
+        selectedDomains: ["suno.com"],
+        cookieStore,
+        manifestStore: flakySaveStore,
+        cdp: cdpFor(offer),
+      }),
+    /已自动回滚/,
+  );
+  assert.equal(cookieStore.jar.size, 0);
+  const raw = JSON.parse(await readFile(path.join(real.dir, "manifest.json"), "utf8"));
+  assert.equal(raw.entries[0].status, "rolled_back");
+});
+
+test("pending manifest write failure means nothing was injected", async () => {
   const cookieStore = makeCookieStore();
   const failingStore = {
     load: async () => ({ entries: [] }),
@@ -230,9 +360,9 @@ test("manifest save failure rolls back injected cookies (constraint 8)", async (
         manifestStore: failingStore,
         cdp: cdpFor(offer),
       }),
-    /已自动回滚/,
+    /未注入任何 Cookie/,
   );
-  assert.equal(cookieStore.jar.size, 0, "no cookie may survive a failed manifest write");
+  assert.equal(cookieStore.jar.size, 0, "write-ahead failure must happen before injection");
 });
 
 test("manifest records the target space and rollback reports removedCount", async () => {

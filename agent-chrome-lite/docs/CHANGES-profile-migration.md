@@ -1,8 +1,20 @@
-# CHANGES：登录态迁移向导（Chrome → Agent）— 交付审计文档 v2
+# CHANGES：登录态迁移向导（Chrome → Agent）— 交付审计文档 v3
 
 > 实现方：GLM。分支 `glm/profile-migration`，基线 `4cedd9e`。
-> v2：针对 Codex 审计退回的 5 项阻塞项逐一修复，本文档重写为修复后状态。
+> v3：修复第二轮审计的两个 P0 回滚问题，并采纳 WAL（pending → committed）建议。
 > 状态：**待 Codex 复审**。不自行合并、不推送、不宣布完成。
+
+## R2. 第二轮审计修复（P0）
+
+| # | 审计意见 | 修复 | 证据 |
+| --- | --- | --- | --- |
+| 1 | 单平台注入中途失败，前半批 Cookie 不回滚（实测残留 1、回滚 0） | 注入改为逐条 `set()` 后**立即登记回滚账本**；任意一条失败即回滚全部已登记项。删除了旧的整体完成后才登记的逻辑 | 测试 `"mid-injection failure rolls back earlier cookies of the same platform"`（第 2 条 set 抛错 → 第 1 条被回滚，jar 为空，manifest 状态 `rolled_back`） |
+| 2a | 回滚失败被 `.catch(() => undefined)` 静默吞掉，仍报"已回滚" | `rollbackInjectedCookies` 改为逐条 try/catch 汇总 `{succeeded, failed}`；任一失败 → 抛 `migration_rollback_failed`，**绝不报"已回滚"**；manifest 记 `rollbackFailed: true` 留待清理 | 测试 `"rollback failure is escalated, not swallowed"`（remove 全部失败 → 报错码 `migration_rollback_failed`、jar 保留 2 条、manifest `rollbackFailed` + `pending`） |
+| 2b | 建议增加启动续清理 | 新增 `recoverPendingMigrations()`：启动时扫描 `pending`/rollbackFailed 记录，按 manifest 清单幂等移除残留 Cookie，成功后标记 `rolled_back` + `recoveredAt`；main.mjs 启动时调用，输出仅含计数的 console.warn | 测试 `"pending manifest entries are recovered on startup"`；main.mjs 启动序列 |
+| 附加 | 崩溃窗口：注入后、manifest 写入前崩溃会留下无记录 Cookie | manifest 改为 **write-ahead**：注入前先写 `pending` 条目（仅名/域/路径，无值）→ 注入+验证 → `committed`；任何时点崩溃，磁盘上都有一份可恢复清单。回滚/提交的中间状态写失败时，pending 记录仍在磁盘，启动恢复范盖 | 流程见 `runLoginMigration`；新增测试 `"committed manifest save failure rolls everything back"`、`"pending manifest write failure means nothing was injected"` |
+
+附带加固：非 sanitized 的底层 store 异常不再原样抛向渲染层（防止低层错误信息捲带
+Cookie 元数据），统一包装为 `migration_inject_failed` 计数型错误。
 
 ## 0. 架构决策（方案 A，审计口径按修正后的表述）
 
@@ -49,18 +61,17 @@
 
 ## 3. 十条硬约束 → 实现位置对照
 
-同 v1，第 4/5/8 条表述与实现按 §1 修复后口径：
+同 v1，第 4/5/8 条表述与实现按 R2 修复后口径：
 
 - #4 平台名字白名单：CDP 返回 → **同步**名字过滤 → 非白名单即弃（不做二次处理）；
-- #5 值只在主进程：摘要/manifest/错误仅含计数、域名、Cookie 名（`SECRET-…` 注入测试断言序列化不含值）；
-- #8 回滚：前置失败不注入；注入后先登记回滚清单再验证；验证失败自动回滚；**manifest 写失败自动回滚**；显式回滚只动 manifest 列表。
+- #5 值只在主进程：摘要/manifest/错误仅含计数、域名、Cookie 名（`SECRET-…` 注入测试断言序列化不含值）；底层异常包装后上抛；
+- #8 回滚（WAL 语义）：pending 先行 → 每条 set 后立即登记账本 → 验证/提交失败自动回滚 → 回滚自身失败升级为 `migration_rollback_failed` 并留待启动恢复；显式回滚只动 manifest 列表。
 
-## 4. 实现方自测（修复后）
+## 4. 实现方自测（v3 修复后）
 
 - `npm run check`：64 文件语法通过；
-- `npm test`：**94 tests，93 pass / 0 fail / 1 skipped**（新增 space 5 项、migrator 2 项）；
-- 无头启动冒烟（临时 runtime、独立端口）：daemon 监听、UI 初始化、
-  `spaces/registry.json` 与 `profile/Partitions/abl-space-default` 生成、自动退出正常。
+- `npm test`：**98 tests，97 pass / 0 fail / 1 skipped**（本轮新增 5 项回滚回归测试）；
+- 无头启动冒烟：daemon 监听、UI 初始化、Space partition 生成、自动退出正常。
 
 ## 5. 留给审计人的验收项（未变 + 新增）
 

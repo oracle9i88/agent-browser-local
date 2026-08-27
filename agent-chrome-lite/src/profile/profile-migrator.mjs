@@ -261,24 +261,12 @@ async function collectPlatformCookies(offer, domains, cdp) {
   return { platform: offer.platform, label: offer.label, domains, cookies: injected, targetUrl: target.url };
 }
 
-async function injectPlatformCookies(cookieStore, collected) {
-  if (!cookieStore || typeof cookieStore.set !== "function" || typeof cookieStore.get !== "function" || typeof cookieStore.remove !== "function") {
-    throw sanitizedError("迁移向导：Agent Cookie 存储不可用", "cookie_store_unavailable");
-  }
-  let injected = 0;
-  for (const cookie of collected.cookies) {
-    await cookieStore.set(cookie);
-    injected += 1;
-  }
-  return injected;
-}
-
 async function verifyInjectedCookies(cookieStore, collected) {
   for (const cookie of collected.cookies) {
     const found = await cookieStore.get({ name: cookie.name, domain: cookie.domain });
     if (!Array.isArray(found) || found.length === 0) {
       throw sanitizedError(
-        `迁移向导：${collected.label} 同步后验证未通过，已自动回滚`,
+        `迁移向导：${collected.label} 同步后验证未通过`,
         `${collected.platform}_postcheck_failed`,
       );
     }
@@ -305,32 +293,61 @@ export function createManifestStore(manifestDir, { manifestName = "manifest.json
   return { load, save, manifestPath };
 }
 
-function buildManifestEntry({ id, at, results, sourceProfile, space }) {
+function buildManifestEntry({ id, at, collected, sourceProfile, space, status }) {
   return {
     id,
     at,
+    status,
     sourceProfile: sourceProfile ? String(sourceProfile) : "",
     plan: "login-state-cdp",
     space: space && typeof space === "object"
       ? { id: String(space.id || ""), partition: String(space.partition || "") }
       : { id: "default", partition: "abl-space-default" },
-    platforms: results.map((result) => ({
-      platform: result.platform,
-      label: result.label,
-      domains: [...result.domains],
-      injectedCount: result.injectedCount,
-      injectedCookies: result.injectedCookies.map((cookie) => ({
+    platforms: collected.map((item) => ({
+      platform: item.platform,
+      label: item.label,
+      domains: [...item.domains],
+      plannedCount: item.cookies.length,
+      // names/domains/paths only — cookie values never enter the manifest
+      cookies: item.cookies.map((cookie) => ({
         name: cookie.name,
         domain: cookie.domain,
         path: cookie.path,
       })),
-      verified: true,
     })),
   };
 }
 
 /**
+ * Best-effort removal of injected cookies. NEVER throws per-cookie: every
+ * failure is collected so the caller can escalate instead of silently
+ * reporting a rollback that did not fully happen.
+ */
+async function rollbackInjectedCookies(cookieStore, injectedCookies) {
+  let succeeded = 0;
+  const failures = [];
+  for (const cookie of injectedCookies) {
+    try {
+      await cookieStore.remove(cookieUrl(cookie.domain, cookie.path), cookie.name);
+      succeeded += 1;
+    } catch (error) {
+      failures.push({
+        name: cookie.name,
+        domain: cookie.domain,
+        reason: String(error?.message || error).slice(0, 160),
+      });
+    }
+  }
+  return { succeeded, failed: failures.length, failures };
+}
+
+/**
  * Run one user-initiated login-state migration.
+ *
+ * Write-ahead manifest: a `pending` entry (cookie names/domains/paths only,
+ * never values) is persisted BEFORE any injection. A crash between injection
+ * and commit therefore always leaves a recoverable record; startup recovery
+ * (recoverPendingMigrations) removes leftover cookies from pending entries.
  *
  * Contract (Codex constraints 1-9):
  * - called only from the wizard's explicit "开始同步" action (IPC wiring);
@@ -355,107 +372,140 @@ export async function runLoginMigration({
     throw sanitizedError("迁移向导：manifest 存储不可用", "manifest_store_unavailable");
   }
 
-  // Pre-verify every platform BEFORE touching the agent cookie store, so a
-  // partial failure can never leave a half-migrated profile (constraint 8).
+  // 1. Pre-verify every platform BEFORE touching the agent cookie store.
   const collected = [];
   try {
     for (const { offer, domains } of selections) {
       collected.push(await collectPlatformCookies(offer, domains, cdp));
     }
   } catch (error) {
-    for (const entry of collected) {
-      entry.cookies = null;
+    for (const item of collected) {
+      item.cookies = null;
     }
     throw error;
   }
 
-  const injectedCookies = [];
-  const results = [];
-  try {
-    for (const entry of collected) {
-      const injectedCount = await injectPlatformCookies(cookieStore, entry);
-      // Register for rollback BEFORE verifying, so a failed postcheck rolls
-      // back everything injected so far (constraint 8).
-      injectedCookies.push(...entry.cookies);
-      await verifyInjectedCookies(cookieStore, entry);
-      results.push({
-        platform: entry.platform,
-        label: entry.label,
-        domains: entry.domains,
-        injectedCount,
-        injectedCookies: entry.cookies,
-        targetUrl: entry.targetUrl,
-      });
-    }
-  } catch (error) {
-    // Auto-rollback anything already injected (constraint 8).
-    await rollbackInjectedCookies(cookieStore, injectedCookies).catch(() => undefined);
-    for (const entry of collected) {
-      entry.cookies = null;
-    }
-    throw error;
-  }
-
+  // 2. Write-ahead: persist the pending manifest before any injection.
   const entry = buildManifestEntry({
     id: `migration-${Date.now()}-${randomUUID().slice(0, 8)}`,
     at: now(),
-    results,
+    collected,
     sourceProfile,
     space,
+    status: "pending",
   });
   const document_ = await manifestStore.load();
   document_.entries.push(entry);
   try {
     await manifestStore.save(document_);
   } catch (error) {
-    // Without a persisted manifest there is no rollback record, so the only
-    // safe outcome is a full rollback of everything injected (constraint 8).
-    await rollbackInjectedCookies(cookieStore, injectedCookies).catch(() => undefined);
-    for (const result of results) {
-      result.injectedCookies = null;
-    }
     for (const item of collected) {
       item.cookies = null;
     }
-    injectedCookies.length = 0;
     throw sanitizedError(
-      "迁移向导：迁移记录写入失败，已自动回滚本次同步的全部 Cookie",
-      "manifest_save_failed",
+      "迁移向导：迁移记录写入失败，本次未注入任何 Cookie",
+      "manifest_write_failed",
     );
   }
 
-  // Drop all cookie material (constraint 6).
-  for (const result of results) {
-    result.injectedCookies = null;
+  // 3. Inject with per-cookie rollback registration, then verify.
+  const ledger = [];
+  const noteFailure = async (statusField) => {
+    entry[statusField] = now();
+    try {
+      await manifestStore.save(document_);
+    } catch {
+      // The pending entry is already persisted; startup recovery will still
+      // find and clean it. Nothing else to do here.
+    }
+  };
+  try {
+    for (const item of collected) {
+      for (const cookie of item.cookies) {
+        await cookieStore.set(cookie);
+        // register immediately: a later set() failure must not orphan
+        // earlier cookies of the same platform
+        ledger.push(cookie);
+      }
+      await verifyInjectedCookies(cookieStore, item);
+    }
+  } catch (error) {
+    const rollback = await rollbackInjectedCookies(cookieStore, ledger);
+    for (const item of collected) {
+      item.cookies = null;
+    }
+    ledger.length = 0;
+    if (rollback.failed > 0) {
+      entry.rollbackFailed = true;
+      entry.rollbackFailures = rollback.failed;
+      await noteFailure("failedAt");
+      throw sanitizedError(
+        `迁移向导：同步失败，且自动回滚未完全完成（残留 ${rollback.failed} 项；下次启动时会自动继续清理）`,
+        "rollback_failed",
+      );
+    }
+    entry.status = "rolled_back";
+    await noteFailure("rolledBackAt");
+    // rethrow sanitized errors as-is; wrap raw store errors so no low-level
+    // detail (possibly cookie metadata) escapes into the renderer
+    if (error?.code?.startsWith("migration_")) throw error;
+    throw sanitizedError("迁移向导：同步失败，已自动回滚本次同步的全部 Cookie", "inject_failed");
   }
+
+  // 4. Commit.
+  entry.status = "committed";
+  entry.committedAt = now();
+  try {
+    await manifestStore.save(document_);
+  } catch (error) {
+    const rollback = await rollbackInjectedCookies(cookieStore, ledger);
+    for (const item of collected) {
+      item.cookies = null;
+    }
+    ledger.length = 0;
+    if (rollback.failed > 0) {
+      entry.rollbackFailed = true;
+      entry.rollbackFailures = rollback.failed;
+      entry.status = "pending";
+      await noteFailure("failedAt");
+      throw sanitizedError(
+        `迁移向导：迁移状态写入失败，自动回滚未完全完成（残留 ${rollback.failed} 项；下次启动时会自动继续清理）`,
+        "rollback_failed",
+      );
+    }
+    entry.status = "rolled_back";
+    await noteFailure("rolledBackAt");
+    throw sanitizedError(
+      "迁移向导：迁移状态写入失败，已自动回滚本次同步的全部 Cookie",
+      "manifest_commit_failed",
+    );
+  }
+
+  // Drop all cookie material (constraint 6) — counts captured first.
+  const plannedCounts = collected.map((item) => item.cookies.length);
   for (const item of collected) {
     item.cookies = null;
   }
-  injectedCookies.length = 0;
+  ledger.length = 0;
 
   return {
     id: entry.id,
-    platforms: results.map((result) => ({
-      platform: result.platform,
-      label: result.label,
-      domains: [...result.domains],
-      injectedCount: result.injectedCount,
+    platforms: collected.map((item, index) => ({
+      platform: item.platform,
+      label: item.label,
+      domains: [...item.domains],
+      injectedCount: plannedCounts[index],
       verified: true,
-      startUrl: MIGRATION_PLATFORM_OFFERS.find((offer) => offer.platform === result.platform)?.startUrl,
+      startUrl: MIGRATION_PLATFORM_OFFERS.find((offer) => offer.platform === item.platform)?.startUrl,
     })),
   };
 }
-
-async function rollbackInjectedCookies(cookieStore, injectedCookies) {
-  for (const cookie of injectedCookies) {
-    await cookieStore.remove(cookieUrl(cookie.domain, cookie.path), cookie.name);
-  }
-}
-
 /**
  * Roll back the latest (or a specific) migration by removing exactly the
  * cookies listed in the manifest. Only manifest-listed cookies are touched —
  * the rest of the agent profile is never modified (constraint 8).
+ * Removal failures are escalated (migration_rollback_failed), never silently
+ * swallowed; the entry stays eligible for startup recovery.
  */
 export async function rollbackLoginMigration({
   migrationId,
@@ -463,7 +513,9 @@ export async function rollbackLoginMigration({
   manifestStore,
 } = {}) {
   const document = await manifestStore.load();
-  const entries = document.entries.filter((entry) => !entry.rolledBackAt);
+  const entries = document.entries.filter(
+    (entry) => !entry.rolledBackAt && entry.status !== "rolled_back",
+  );
   if (entries.length === 0) {
     throw sanitizedError("迁移向导：没有可回滚的迁移记录", "nothing_to_rollback");
   }
@@ -476,23 +528,86 @@ export async function rollbackLoginMigration({
   if (!cookieStore || typeof cookieStore.remove !== "function") {
     throw sanitizedError("迁移向导：Agent Cookie 存储不可用", "cookie_store_unavailable");
   }
-  let removed = 0;
+  const listed = [];
   for (const platform of entry.platforms) {
-    for (const cookie of platform.injectedCookies) {
-      await cookieStore.remove(cookieUrl(cookie.domain, cookie.path), cookie.name);
-      removed += 1;
+    for (const cookie of platform.cookies || platform.injectedCookies || []) {
+      listed.push(cookie);
     }
   }
+  const rollback = await rollbackInjectedCookies(cookieStore, listed);
+  entry.removedCount = rollback.succeeded;
+  if (rollback.failed > 0) {
+    entry.rollbackFailed = true;
+    entry.rollbackFailures = rollback.failed;
+    try {
+      await manifestStore.save(document);
+    } catch {
+      // pending record stays on disk; startup recovery will retry
+    }
+    throw sanitizedError(
+      `迁移向导：回滚未完全完成（${rollback.failed} 项未能移除；下次启动时会自动继续清理）`,
+      "rollback_failed",
+    );
+  }
   entry.rolledBackAt = new Date().toISOString();
-  entry.removedCount = removed;
+  entry.status = "rolled_back";
   await manifestStore.save(document);
   return {
     id: entry.id,
-    removedCount: removed,
+    removedCount: rollback.succeeded,
     space: entry.space,
     platforms: entry.platforms.map((platform) => ({
       platform: platform.platform,
       label: platform.label,
     })),
   };
+}
+
+/**
+ * Startup recovery: pending entries are either unfinished migrations or
+ * migrations whose rollback did not fully complete. Remove every listed
+ * cookie (removal is idempotent) and mark the entry recovered. Returns a
+ * counts-only summary safe for logs.
+ */
+export async function recoverPendingMigrations({
+  cookieStore,
+  manifestStore,
+  now = () => new Date().toISOString(),
+} = {}) {
+  if (!cookieStore || typeof cookieStore.remove !== "function") {
+    throw sanitizedError("迁移向导：Agent Cookie 存储不可用", "cookie_store_unavailable");
+  }
+  const document = await manifestStore.load();
+  const pending = document.entries.filter(
+    (entry) => entry.status === "pending" || (!entry.status && !entry.rolledBackAt && !entry.committedAt),
+  );
+  let removed = 0;
+  let failed = 0;
+  for (const entry of pending) {
+    const listed = [];
+    for (const platform of entry.platforms || []) {
+      for (const cookie of platform.cookies || platform.injectedCookies || []) {
+        listed.push(cookie);
+      }
+    }
+    const rollback = await rollbackInjectedCookies(cookieStore, listed);
+    removed += rollback.succeeded;
+    failed += rollback.failed;
+    if (rollback.failed === 0) {
+      entry.status = "rolled_back";
+      entry.recoveredAt = now();
+      entry.removedCount = rollback.succeeded;
+    } else {
+      entry.rollbackFailed = true;
+      entry.rollbackFailures = rollback.failed;
+    }
+  }
+  if (pending.length > 0) {
+    try {
+      await manifestStore.save(document);
+    } catch {
+      // keep retrying on next startup
+    }
+  }
+  return { entries: pending.length, removed, failed };
 }
