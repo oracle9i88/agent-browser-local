@@ -80,6 +80,71 @@ export async function getChromeCookies(target, { timeoutMs = 5000 } = {}) {
   }
 }
 
+function hostnameOf(value) {
+  try {
+    return new URL(String(value || "")).hostname.toLowerCase().replace(/\.$/, "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pick the open Chrome tab whose URL host matches any of the given domains
+ * (suffix match, so creator.douyin.com matches domain douyin.com).
+ */
+export function findChromeTargetForDomains(targets, domains) {
+  const list = (Array.isArray(domains) ? domains : []).map((domain) =>
+    String(domain || "").toLowerCase().replace(/^\./, ""),
+  );
+  if (list.length === 0) return null;
+  return (
+    (Array.isArray(targets) ? targets : []).find((target) => {
+      const hostname = hostnameOf(target?.url);
+      return list.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
+    }) || null
+  );
+}
+
+/**
+ * Read cookies scoped to the given URLs at the protocol level
+ * (Network.getCookies{urls}), so non-authorized cookies are never pulled
+ * into memory in the first place. Used by the login-state migration only.
+ */
+export async function getChromeCookiesForUrls(
+  target,
+  urls,
+  { timeoutMs = 5000 } = {},
+) {
+  if (!target?.webSocketDebuggerUrl) throw new Error("Chrome target has no debugger endpoint");
+  const requestedUrls = (Array.isArray(urls) ? urls : []).filter(
+    (url) => typeof url === "string" && url.startsWith("https://"),
+  );
+  if (requestedUrls.length === 0) return [];
+  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Chrome CDP connection timeout")), timeoutMs);
+    socket.once("open", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    socket.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
+  try {
+    const result = await sendCommand(
+      socket,
+      "Network.getCookies",
+      { urls: requestedUrls },
+      { timeoutMs },
+    );
+    return Array.isArray(result.cookies) ? result.cookies : [];
+  } finally {
+    socket.close();
+  }
+}
+
 export function isSunoTarget(target) {
   try {
     const hostname = new URL(String(target?.url || "")).hostname.toLowerCase();
