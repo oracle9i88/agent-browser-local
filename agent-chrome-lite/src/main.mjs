@@ -16,6 +16,8 @@ import { BrowserController } from "./browser/controller.mjs";
 import { readSunoCookiesFromChrome } from "./browser/chrome-cdp.mjs";
 import { ContributionPopupRouter } from "./browser/popup-router.mjs";
 import { classifyExternalAuthUrl } from "./browser/external-auth.mjs";
+import { createSpaceManager, DEFAULT_SPACE_ID } from "./browser/space-manager.mjs";
+import { createTabOwnership } from "./browser/tab-ownership.mjs";
 import {
   assertNoElectronBrand,
   buildChromiumUserAgent,
@@ -55,6 +57,10 @@ let popupRouter;
 let pendingExternalAuth = null;
 let lastAutoOpenedExternalAuth = null;
 const migrationManifests = createManifestStore(path.join(runtimeDir, "migration"));
+let spaceManager;
+let defaultSpace;
+let browsingSession;
+let tabOwnership;
 
 function startupErrorMessage(error) {
   if (error?.code === "EADDRINUSE") {
@@ -131,7 +137,7 @@ async function syncPendingExternalAuth() {
   const { targetUrl, cookies } = await readSunoCookiesFromChrome({ endpoint });
   const imported = await importSunoAuthCookies({
     cookies,
-    cookieStore: session.defaultSession.cookies,
+    cookieStore: browsingSession.cookies,
   });
   controller?.setHandoff(
     `已同步 ${imported.count} 项 Suno 会话资料。页面正在刷新；确认已回到已登录页面后，再点击“我已接管”。`,
@@ -243,7 +249,7 @@ async function waitForToolbarChange(previousState) {
 }
 
 async function createWindow(config) {
-  session.defaultSession.setUserAgent(
+  browsingSession.setUserAgent(
     browserUserAgent,
     "zh-CN,zh;q=0.9,en;q=0.8",
   );
@@ -265,6 +271,9 @@ async function createWindow(config) {
 
   contentView = new WebContentsView({
     webPreferences: {
+      // Agent 浏览会话运行在默认 Space 的持久化 partition 中，
+      // 与 Electron defaultSession 及其他 Space 结构性隔离。
+      partition: `persist:${defaultSpace.partition}`,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -274,6 +283,7 @@ async function createWindow(config) {
       safeDialogs: true,
     },
   });
+  tabOwnership.bind(contentView.webContents.id, defaultSpace.id);
   mainWindow.contentView.addChildView(contentView);
   mainWindow.on("resize", layoutContent);
   layoutContent();
@@ -290,7 +300,7 @@ async function createWindow(config) {
     },
   });
   egressPolicy = installNetworkEgressPolicy({
-    browserSession: session.defaultSession,
+    browserSession: browsingSession,
     config,
     onBlocked: (decision, details) => {
       console.warn(
@@ -366,17 +376,19 @@ function installIpc() {
   // 迁移向导：仅由用户在 UI 中显式触发；daemon/Agent 没有任何调用路径。
   ipcMain.handle("migration:detect", () => detectChromeProfiles());
   ipcMain.handle("migration:offers", () => listMigrationOffers());
+  ipcMain.handle("migration:spaces", () => spaceManager.listSpaces());
   ipcMain.handle("migration:run", (_event, selectedDomains) =>
     runLoginMigration({
       selectedDomains,
-      cookieStore: session.defaultSession.cookies,
+      cookieStore: browsingSession.cookies,
       manifestStore: migrationManifests,
+      space: defaultSpace,
     }),
   );
   ipcMain.handle("migration:rollback", (_event, migrationId) =>
     rollbackLoginMigration({
       migrationId: typeof migrationId === "string" ? migrationId : undefined,
-      cookieStore: session.defaultSession.cookies,
+      cookieStore: browsingSession.cookies,
       manifestStore: migrationManifests,
     }),
   );
@@ -395,6 +407,14 @@ if (!singleInstance) {
   app.whenReady().then(async () => {
     try {
       const { config, configPath, tokens } = await loadConfig();
+      spaceManager = createSpaceManager({
+        spacesDir: path.join(runtimeDir, "spaces"),
+        sessionFactory: (name) => session.fromPartition(name),
+      });
+      await spaceManager.ensureDefaultSpace();
+      defaultSpace = await spaceManager.getSpace(DEFAULT_SPACE_ID);
+      browsingSession = spaceManager.sessionFor(defaultSpace);
+      tabOwnership = createTabOwnership({ defaultSpaceId: defaultSpace.id });
       installIpc();
       await createWindow(config);
 
