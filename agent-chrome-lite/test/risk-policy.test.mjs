@@ -77,6 +77,26 @@ test("blocks credentials and verification fields", () => {
   }
 });
 
+test("never auto-checks human-verification controls", () => {
+  for (const node of [
+    { tag: "input", role: "checkbox", name: "I am human" },
+    { tag: "button", role: "button", name: "I'm not a robot" },
+    { tag: "div", role: "checkbox", name: "人机验证" },
+  ]) {
+    const risk = classifyAction({ action: "click", node, url: "https://suno.com/create" });
+    assert.equal(risk.blocked, true, node.name);
+    assert.equal(risk.code, "human_verification_requires_handoff");
+  }
+});
+
+test("human-verification snapshot surfaces stop before an agent can click them", () => {
+  const risk = classifySnapshotSurface({
+    controls: [{ tag: "input", role: "checkbox", name: "I'm not a robot" }],
+  });
+  assert.equal(risk.blocked, true);
+  assert.equal(risk.code, "human_verification_requires_handoff");
+});
+
 test("same-URL login surfaces trigger handoff before snapshot data is returned", () => {
   const risk = classifySnapshotSurface({
     controls: [

@@ -17,6 +17,11 @@ const authWords = [
   /登录|登陆|验证码|验证身份|滑块/i,
 ];
 
+const humanVerificationWords = [
+  /i\s*(?:am|'m)\s+(?:a\s+)?human|not\s+a\s+robot|human\s+verification|prove\s+you(?:'re| are)\s+human/i,
+  /人机验证|人类验证|我是人类|我不是机器人|安全验证|安全检查/i,
+];
+
 const legalWords = [
   /agree|agreement|terms|consent/i,
   /同意|协议|条款|授权|声明|原创/i,
@@ -66,6 +71,18 @@ export function classifySnapshotSurface(snapshot) {
     );
   });
 
+  const hasHumanVerification = controls.some((node) =>
+    matchesAny(surfaceText(node), humanVerificationWords),
+  );
+
+  if (hasHumanVerification) {
+    return {
+      blocked: true,
+      code: "human_verification_requires_handoff",
+      reason: "检测到人机验证或‘我不是机器人’控件，必须由用户本人完成；Agent 不得代勾。",
+    };
+  }
+
   if (hasAuthControl) {
     return {
       blocked: true,
@@ -112,6 +129,14 @@ export function classifyAction({ action, node, url }) {
   }
 
   if (action !== "click") return { blocked: false };
+
+  if (matchesAny(text, humanVerificationWords)) {
+    return {
+      blocked: true,
+      code: "human_verification_requires_handoff",
+      reason: "检测到人机验证或‘我不是机器人’控件，必须由用户本人完成；Agent 不得代勾。",
+    };
+  }
 
   if (matchesAny(text, authWords)) {
     return {

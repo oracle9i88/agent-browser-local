@@ -84,6 +84,19 @@ test("external main-frame navigation is allowed only with immediate handoff", ()
   assert.equal(decision.code, "outside_contribution_scope");
 });
 
+test("Google OAuth URLs remain outside contribution scope", () => {
+  const decision = classifyPageRequest(
+    {
+      url: "https://accounts.google.com/o/oauth2/v2/auth?client_id=redacted",
+      resourceType: "mainFrame",
+    },
+    config,
+  );
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.requiresHandoff, true);
+  assert.equal(decision.code, "outside_contribution_scope");
+});
+
 test("unsafe schemes and embedded URL credentials are blocked", () => {
   assert.equal(
     classifyPageRequest(

@@ -107,6 +107,8 @@ button:disabled { color: #666d79; }
 .agent-state.page-fault { color: #ff8d8d; }
 
 .handoff,
+.external-auth,
+.external-auth-sync,
 .recovery {
   padding: 0 12px;
   border-color: #705a2c;

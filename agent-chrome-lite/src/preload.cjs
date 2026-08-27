@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   forward: () => ipcRenderer.invoke("browser:forward"),
   reload: () => ipcRenderer.invoke("browser:reload"),
   recover: () => ipcRenderer.invoke("browser:recover"),
+  openExternalAuth: () => ipcRenderer.invoke("browser:open-external-auth"),
+  syncExternalAuth: () => ipcRenderer.invoke("browser:sync-external-auth"),
   clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
   onState: (callback) => {
     const listener = (_event, state) => callback(state);

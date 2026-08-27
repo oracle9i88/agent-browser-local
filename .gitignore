@@ -1,0 +1,7 @@
+# Keep this root Git repository scoped to its actual tracked project.
+# The workspace also contains large, unrelated media and project directories;
+# excluding them prevents Codex snapshot indexes from hashing those files.
+/*
+!/.gitignore
+!/agent-chrome-lite/
+

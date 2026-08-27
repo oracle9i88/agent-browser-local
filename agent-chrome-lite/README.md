@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.1`（Public Preview）。
+当前版本：`v0.3.0-beta.2`（Public Preview）。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -14,7 +14,7 @@
 
 - Electron/Chromium 独立窗口与独立 Profile，不读取日常 Chrome 数据。
 - 所有受控页面都按不可信输入处理：sandbox、权限全拒绝、`webSecurity`、安全弹窗和统一网络出口同时生效。
-- 受控页面不能探测 daemon、loopback、私网、`file:` 或带账号密码的 URL；外部登录页可以显示，但进入前即触发 handoff。
+- 受控页面不能探测 daemon、loopback、私网、`file:` 或带账号密码的 URL；普通外部登录页进入前即触发 handoff，Google/Suno 认证 URL 会在请求继续前转交系统 Chrome。
 - renderer 崩溃、页面无响应、主框架加载失败或 CDP 超时只会把当前页面标为故障并冻结自动化；daemon 与登录 Profile 保留，不自动重建或反复登录。
 - Snapshot-first：通过 Chromium Accessibility/CDP 生成短期 `ref`，不向 Agent 暴露 CSS/XPath；评论、统计和记录型内容不进入 Snapshot。
 - `ref` 在每次动作、刷新或导航后失效。
@@ -23,11 +23,13 @@
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
 - 创建、发布、提交、删除、支付、登录、验证码、协议确认、Suno Create、Get Stems/MIDI 等动作在发出前由 daemon 拦截并 handoff。
+- 人机验证、CAPTCHA、“我不是机器人”和类似安全检查永远由用户本人完成；Agent 只负责识别、暂停和提示，不会自动勾选或尝试绕过。
 - 单队列、人类节奏执行和 JSONL 审计。
 - MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
 - NovaGe/NovaDe 共用 `adapters/python/agent_browser_client.py`；principal 固定为本机 token 映射，服务地址只能是 loopback，上传文件只能来自各自 workspace。
 - macOS 单实例锁：重复双击只唤醒已运行窗口，不创建第二个 daemon 或第二套 Profile。
 - 启动失败会显示本地错误窗口；页面故障会在工具栏显示红色状态，同时明确保留登录资料。
+- Google/Suno 登录不会在 Electron 内嵌窗口里反复尝试：检测到认证弹窗或主框架认证跳转时，自动打开系统 Chrome，并冻结当前页面。完成登录后，需在 Chrome 保留 Suno 页面并点击“完成后同步认证”；桥只读取 Suno allowlist 会话 Cookie，刷新 Agent Browser 页面，最后由用户确认“我已接管”。同步需要 Chrome 远程调试端点（默认 `http://127.0.0.1:9222`，可用 `ABL_CHROME_CDP_URL` 覆盖），不会读取 Google Cookie，也不会复制整个 Chrome Profile。
 
 ## 明确不提供
 
@@ -142,7 +144,7 @@ npm run platforms -- --disable suno
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.1`
+- Git tag：`v0.3.0-beta.2`
 - GitHub Release：Pre-release，仅发布源码。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。

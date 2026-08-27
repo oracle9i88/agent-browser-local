@@ -10,8 +10,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AuditLog } from "./audit.mjs";
+import { openInChrome } from "./browser/chrome-launcher.mjs";
+import { importSunoAuthCookies } from "./browser/auth-bridge.mjs";
 import { BrowserController } from "./browser/controller.mjs";
+import { readSunoCookiesFromChrome } from "./browser/chrome-cdp.mjs";
 import { ContributionPopupRouter } from "./browser/popup-router.mjs";
+import { classifyExternalAuthUrl } from "./browser/external-auth.mjs";
 import {
   assertNoElectronBrand,
   buildChromiumUserAgent,
@@ -41,6 +45,8 @@ let api;
 let egressPolicy;
 let daemonReady = false;
 let popupRouter;
+let pendingExternalAuth = null;
+let lastAutoOpenedExternalAuth = null;
 
 function startupErrorMessage(error) {
   if (error?.code === "EADDRINUSE") {
@@ -49,10 +55,112 @@ function startupErrorMessage(error) {
   return String(error?.message || error || "未知启动错误").slice(0, 1200);
 }
 
+function externalAuthReason(provider) {
+  if (provider === "google") {
+    return "Google 登录已转到 Chrome。完成后点“同步认证”，只把 Suno 会话带回本窗口；同步前 Agent 保持冻结。";
+  }
+  return "Suno 登录已转到 Chrome。完成后点“同步认证”，只把 Suno 会话带回本窗口；同步前 Agent 保持冻结。";
+}
+
+function setExternalAuthHandoff(auth) {
+  pendingExternalAuth = auth;
+  controller?.setHandoff(externalAuthReason(auth.provider), {
+    code: "external_auth_required",
+    provider: auth.provider,
+    displayUrl: auth.displayUrl,
+    externalBrowser: "Chrome",
+  });
+}
+
+async function openPendingExternalAuth({ auto = false } = {}) {
+  if (!pendingExternalAuth) {
+    throw new Error("当前没有等待外部浏览器认证的页面");
+  }
+  const auth = pendingExternalAuth;
+  if (
+    auto &&
+    lastAutoOpenedExternalAuth?.url === auth.url &&
+    Date.now() - lastAutoOpenedExternalAuth.at < 2500
+  ) {
+    return {
+      opened: false,
+      provider: auth.provider,
+      displayUrl: auth.displayUrl,
+      deduplicated: true,
+    };
+  }
+  if (auto) lastAutoOpenedExternalAuth = { url: auth.url, at: Date.now() };
+  try {
+    const launch = await openInChrome(auth.url);
+    return {
+      opened: true,
+      provider: auth.provider,
+      displayUrl: auth.displayUrl,
+      browser: launch.browser,
+    };
+  } catch (error) {
+    controller?.setHandoff(
+      "无法自动打开系统 Chrome。请手动打开 Chrome，再访问登录页完成认证。",
+      {
+        code: "external_auth_open_failed",
+        provider: auth.provider,
+        displayUrl: auth.displayUrl,
+        error: String(error?.message || error).slice(0, 240),
+      },
+    );
+    throw error;
+  }
+}
+
+async function syncPendingExternalAuth() {
+  if (!pendingExternalAuth) {
+    throw new Error("当前没有等待同步的外部认证");
+  }
+  if (pendingExternalAuth.provider !== "google" && pendingExternalAuth.provider !== "suno") {
+    throw new Error("当前认证来源不支持 Suno 会话同步");
+  }
+  const endpoint = process.env.ABL_CHROME_CDP_URL || "http://127.0.0.1:9222";
+  const { targetUrl, cookies } = await readSunoCookiesFromChrome({ endpoint });
+  const imported = await importSunoAuthCookies({
+    cookies,
+    cookieStore: session.defaultSession.cookies,
+  });
+  controller?.setHandoff(
+    `已同步 ${imported.count} 项 Suno 会话资料。页面正在刷新；确认已回到已登录页面后，再点击“我已接管”。`,
+    {
+      code: "external_auth_synced",
+      provider: pendingExternalAuth.provider,
+      targetUrl,
+      importedCookies: imported.count,
+    },
+  );
+  await controller?.reload();
+  return { ...imported, targetUrl };
+}
+
+function handleExternalAuthNavigation(url, { event, childWindow } = {}) {
+  const auth = classifyExternalAuthUrl(url);
+  if (!auth) return false;
+  event?.preventDefault?.();
+  childWindow?.close?.();
+  setExternalAuthHandoff(auth);
+  void openPendingExternalAuth({ auto: true }).catch(() => undefined);
+  return true;
+}
+
+function resetExternalAuthState() {
+  pendingExternalAuth = null;
+  lastAutoOpenedExternalAuth = null;
+}
+
 function hardenUntrustedWebContents(webContents) {
   webContents.setUserAgent(browserUserAgent);
+  webContents.on("will-navigate", (event, url) => {
+    handleExternalAuthNavigation(url, { event });
+  });
   egressPolicy.register(webContents);
   webContents.setWindowOpenHandler(({ url }) => {
+    if (handleExternalAuthNavigation(url)) return { action: "deny" };
     if (popupRouter?.route(url)) return { action: "deny" };
     return {
       action: "allow",
@@ -72,6 +180,7 @@ function hardenUntrustedWebContents(webContents) {
   webContents.on("did-create-window", (childWindow) => {
     hardenUntrustedWebContents(childWindow.webContents);
     const routeChild = (event, url) => {
+      if (handleExternalAuthNavigation(url, { event, childWindow })) return;
       if (!popupRouter?.route(url, { close: () => childWindow.close() })) return;
       event?.preventDefault?.();
     };
@@ -226,12 +335,26 @@ async function createWindow(config) {
 
 function installIpc() {
   ipcMain.handle("browser:status", () => runtimeState());
-  ipcMain.handle("browser:navigate", (_event, url) => controller.navigate(url));
-  ipcMain.handle("browser:back", () => controller.back());
-  ipcMain.handle("browser:forward", () => controller.forward());
+  ipcMain.handle("browser:navigate", (_event, url) => {
+    resetExternalAuthState();
+    return controller.navigate(url);
+  });
+  ipcMain.handle("browser:back", () => {
+    resetExternalAuthState();
+    return controller.back();
+  });
+  ipcMain.handle("browser:forward", () => {
+    resetExternalAuthState();
+    return controller.forward();
+  });
   ipcMain.handle("browser:reload", () => controller.reload());
   ipcMain.handle("browser:recover", () => controller.reload());
-  ipcMain.handle("browser:clear-handoff", () => controller.clearHandoff());
+  ipcMain.handle("browser:open-external-auth", () => openPendingExternalAuth());
+  ipcMain.handle("browser:sync-external-auth", () => syncPendingExternalAuth());
+  ipcMain.handle("browser:clear-handoff", () => {
+    resetExternalAuthState();
+    return controller.clearHandoff();
+  });
 }
 
 if (!singleInstance) {
