@@ -39,6 +39,16 @@ test("ximalaya registry exposes only verified contribution entry paths", () => {
   ]);
 });
 
+test("zhihu registry exposes only the article writing entry, never content lists", () => {
+  assert.deepEqual(contributionTargetsFor(["zhihu"]), [
+    {
+      platform: "zhihu",
+      origin: "https://zhuanlan.zhihu.com",
+      pathPrefixes: ["/write"],
+    },
+  ]);
+});
+
 test("wechat channels registry exposes the create surface, not the post list", () => {
   assert.deepEqual(contributionTargetsFor(["wechat_channels"]), [
     {

@@ -45,6 +45,16 @@ const PLATFORM_REGISTRY = Object.freeze({
       }),
     ]),
   }),
+  zhihu: Object.freeze({
+    label: "知乎专栏",
+    evidence: "https://zhuanlan.zhihu.com/write",
+    contributionTargets: Object.freeze([
+      Object.freeze({
+        origin: "https://zhuanlan.zhihu.com",
+        pathPrefixes: Object.freeze(["/write"]),
+      }),
+    ]),
+  }),
   suno: Object.freeze({
     label: "Suno",
     contributionTargets: Object.freeze([
