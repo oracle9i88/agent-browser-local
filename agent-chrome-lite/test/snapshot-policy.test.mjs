@@ -5,13 +5,15 @@ import {
   isContributionHint,
   isKnownCollectionSurface,
   isReadOnlyControl,
+  nativeFileInputBackendIds,
   SnapshotStore,
 } from "../src/browser/snapshot.mjs";
 
-function fakeCdp(nodes, metadata, semanticCandidates = {}) {
+function fakeCdp(nodes, metadata, semanticCandidates = {}, domRoot = {}) {
   return {
     async send(method, params = {}) {
       if (method === "Accessibility.getFullAXTree") return { nodes };
+      if (method === "DOM.getDocument") return { root: domRoot };
       if (method === "DOM.resolveNode") {
         return { object: { objectId: String(params.backendNodeId) } };
       }
@@ -31,6 +33,23 @@ function fakeCdp(nodes, metadata, semanticCandidates = {}) {
     },
   };
 }
+
+test("DOM traversal finds only native file inputs across shadow roots", () => {
+  assert.deepEqual(
+    nativeFileInputBackendIds({
+      nodeName: "HTML",
+      children: [
+        { nodeName: "INPUT", backendNodeId: 1, attributes: ["type", "text"] },
+        { nodeName: "INPUT", backendNodeId: 2, attributes: ["TYPE", "FILE"] },
+      ],
+      shadowRoots: [{
+        nodeName: "#document-fragment",
+        children: [{ nodeName: "input", backendNodeId: 3, attributes: ["type", "file"] }],
+      }],
+    }),
+    [2, 3],
+  );
+});
 
 test("Xiaoyuzhou program collection is opaque before AX is read", async () => {
   assert.equal(
@@ -599,4 +618,44 @@ test("contribution form exposes semantic editor and hidden native file input", a
     { role: "StaticText", text: "点击上传封面" },
     { role: "heading", text: "创建单集" },
   ]);
+});
+
+test("upload surface discovers native file input omitted from AX tree", async () => {
+  const store = new SnapshotStore();
+  const result = await store.capture(
+    fakeCdp(
+      [{
+        nodeId: "upload",
+        backendDOMNodeId: 20,
+        role: { value: "button" },
+        name: { value: "上传音频" },
+      }],
+      {
+        20: { tag: "button", type: "button", visible: true },
+        21: { tag: "input", type: "file", ariaLabel: "选择音频文件", visible: false },
+      },
+      {},
+      {
+        nodeName: "HTML",
+        children: [{
+          nodeName: "BODY",
+          children: [{
+            nodeName: "INPUT",
+            backendNodeId: 21,
+            attributes: ["type", "file", "accept", "audio/*"],
+          }],
+        }],
+      },
+    ),
+    { title: "上传", url: "https://studio.ximalaya.com/upload" },
+  );
+
+  assert.deepEqual(
+    result.controls.map(({ role, name }) => ({ role, name })),
+    [
+      { role: "upload", name: "上传音频" },
+      { role: "file", name: "选择音频文件" },
+    ],
+  );
+  assert.equal(store.resolve(result.controls[1].ref).backendNodeId, 21);
 });

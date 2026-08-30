@@ -64,6 +64,25 @@ export class BrowserDaemon {
     }
   }
 
+  async reconcileDelegatedContributionHandoff(identity) {
+    const handoff = this.controller.status().handoff;
+    if (
+      handoff?.detail?.code !== "outside_contribution_scope" ||
+      !identity.capabilities.includes(CAPABILITIES.FINALIZE)
+    ) {
+      return false;
+    }
+    this.requireContributionPage();
+    this.controller.clearHandoff();
+    await this.audit.record({
+      event: "handoff.auto_resumed",
+      principal: identity.principal,
+      code: handoff.detail.code,
+      url: safeUrl(this.controller.status().url),
+    });
+    return true;
+  }
+
   async blocked(identity, risk, context) {
     const handoff = this.controller.setHandoff(risk.reason, {
       code: risk.code,
@@ -125,6 +144,7 @@ export class BrowserDaemon {
 
       case "browser.snapshot": {
         this.requireCapability(identity, CAPABILITIES.SNAPSHOT);
+        await this.reconcileDelegatedContributionHandoff(identity);
         this.requireNoHandoff();
         this.requireContributionPage();
         const result = await this.controller.snapshot();
@@ -159,6 +179,46 @@ export class BrowserDaemon {
           url: safeUrl(result.url),
         });
         return result;
+      }
+
+      case "browser.scroll": {
+        this.requireCapability(identity, CAPABILITIES.SCROLL);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        const direction = String(params.direction || "");
+        const amount = String(params.amount || "page");
+        if (!new Set(["up", "down"]).has(direction)) {
+          throw new DaemonError(
+            400,
+            "invalid_scroll_direction",
+            "Scroll direction must be up or down",
+          );
+        }
+        if (!new Set(["small", "page", "bottom"]).has(amount)) {
+          throw new DaemonError(
+            400,
+            "invalid_scroll_amount",
+            "Scroll amount must be small, page or bottom",
+          );
+        }
+        if (amount === "bottom" && direction !== "down") {
+          throw new DaemonError(
+            400,
+            "invalid_scroll_combination",
+            "Bottom scrolling is only valid in the down direction",
+          );
+        }
+        return this.executor.run(async () => {
+          const result = await this.controller.scroll({ direction, amount });
+          await this.audit.record({
+            event: "browser.scroll",
+            principal: identity.principal,
+            direction,
+            amount,
+            url: safeUrl(this.controller.status().url),
+          });
+          return result;
+        });
       }
 
       case "browser.click": {
@@ -206,10 +266,17 @@ export class BrowserDaemon {
           url: this.controller.status().url,
         });
         if (risk.blocked) {
-          return this.blocked(identity, risk, {
+          const context = {
             action: "clickVisual",
             ref: params.screenshotId,
-          });
+          };
+          if (
+            !risk.delegableCapability ||
+            !identity.capabilities.includes(risk.delegableCapability)
+          ) {
+            return this.blocked(identity, risk, context);
+          }
+          await this.recordDelegatedAction(identity, risk, context);
         }
         return this.executor.run(async () => {
           const result = await this.controller.clickVisual(target.point);
@@ -263,6 +330,64 @@ export class BrowserDaemon {
         });
       }
 
+      case "browser.fillVisual": {
+        this.requireCapability(identity, CAPABILITIES.FILL);
+        this.requireCapability(identity, CAPABILITIES.CLICK_VISUAL);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        if (typeof params.value !== "string" || params.value.length > 100_000) {
+          throw new DaemonError(400, "invalid_value", "Fill value is invalid or too large");
+        }
+        const target = await this.controller.resolveVisualPoint(params);
+        const currentUrl = new URL(this.controller.status().url);
+        const verifiedXimalayaUploadEditor =
+          currentUrl.origin === "https://studio.ximalaya.com" &&
+          /^\/upload(?:Works)?\/?$/.test(currentUrl.pathname);
+        const editable =
+          target.node.contentEditable ||
+          ["input", "textarea"].includes(target.node.tag) ||
+          ["textbox", "searchbox", "combobox"].includes(target.node.role) ||
+          verifiedXimalayaUploadEditor;
+        if (!editable) {
+          throw new DaemonError(
+            409,
+            "invalid_fill_target",
+            "Visual fill point is not a verified editable control",
+          );
+        }
+        const risk = classifyAction({
+          action: "fill",
+          node: target.node,
+          url: this.controller.status().url,
+        });
+        if (risk.blocked) {
+          return this.blocked(identity, risk, {
+            action: "fillVisual",
+            ref: params.screenshotId,
+          });
+        }
+        return this.executor.run(async () => {
+          const result = await this.controller.fillVisualPoint(
+            target.point,
+            params.value,
+          );
+          await this.audit.record({
+            event: "browser.fillVisual",
+            principal: identity.principal,
+            screenshotId: params.screenshotId,
+            field:
+              target.node.placeholder ||
+              target.node.ariaLabel ||
+              target.node.nameAttr ||
+              target.node.role ||
+              "field",
+            value: params.value,
+            url: safeUrl(this.controller.status().url),
+          });
+          return result;
+        });
+      }
+
       case "browser.upload": {
         this.requireCapability(identity, CAPABILITIES.UPLOAD);
         this.requireNoHandoff();
@@ -301,6 +426,56 @@ export class BrowserDaemon {
             event: "browser.upload",
             principal: identity.principal,
             ref: params.ref,
+            files: checked.map((entry) => ({
+              name: path.basename(entry.filePath),
+              size: entry.size,
+            })),
+            url: safeUrl(this.controller.status().url),
+          });
+          return result;
+        });
+      }
+
+      case "browser.uploadVisual": {
+        this.requireCapability(identity, CAPABILITIES.UPLOAD);
+        this.requireCapability(identity, CAPABILITIES.CLICK_VISUAL);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        const inputFiles = Array.isArray(params.files) ? params.files : [];
+        if (inputFiles.length < 1 || inputFiles.length > 8) {
+          throw new DaemonError(400, "invalid_files", "Upload requires one to eight files");
+        }
+        const target = await this.controller.resolveVisualPoint(params);
+        const label = [
+          target.node?.name,
+          target.node?.ariaLabel,
+          target.node?.title,
+          target.node?.text,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        if (!/upload|上传|选择.{0,8}文件|音频|视频/i.test(label)) {
+          throw new DaemonError(
+            409,
+            "invalid_upload_target",
+            "Visual upload point is not a visible upload control",
+          );
+        }
+        const checked = [];
+        for (const file of inputFiles) {
+          checked.push(
+            await assertAllowedUploadPath(file, this.config.security.uploadRoots),
+          );
+        }
+        return this.executor.run(async () => {
+          const result = await this.controller.uploadVisual(
+            target.point,
+            checked.map((entry) => entry.filePath),
+          );
+          await this.audit.record({
+            event: "browser.uploadVisual",
+            principal: identity.principal,
+            screenshotId: params.screenshotId,
             files: checked.map((entry) => ({
               name: path.basename(entry.filePath),
               size: entry.size,

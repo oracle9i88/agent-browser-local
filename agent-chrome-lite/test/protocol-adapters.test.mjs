@@ -92,6 +92,16 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
           limits: { collectionMode: "contribution-only" },
         };
       }
+      if (method === "browser.scroll") {
+        return {
+          ok: true,
+          direction: "down",
+          amount: "bottom",
+          steps: 3,
+          reachedEnd: true,
+          deltaY: 1920,
+        };
+      }
       throw new Error(`Unexpected offline method: ${method}`);
     },
   };
@@ -141,7 +151,7 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
     await client.connect(transport);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 9);
+    assert.equal(names.length, 12);
     assert.deepEqual(
       names.filter((name) =>
         /publish|submit|delete|pay|evaluate|script|selector/i.test(name),
@@ -159,6 +169,12 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
       arguments: {},
     });
     assert.match(mcpSnapshot.content[0].text, /contribution-only/);
+    const mcpScroll = await client.callTool({
+      name: "browser_scroll",
+      arguments: { direction: "down", amount: "bottom" },
+    });
+    assert.match(mcpScroll.content[0].text, /"direction": "down"/);
+    assert.match(mcpScroll.content[0].text, /"reachedEnd": true/);
   } finally {
     if (client) await client.close().catch(() => undefined);
     if (ws) {

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  CAPABILITIES,
   CONFIRMATION_POLICY,
   DEFAULT_CAPABILITIES,
 } from "./constants.mjs";
@@ -12,7 +13,8 @@ import {
   hardenLegacyContributionTargets,
 } from "./security/platform-registry.mjs";
 
-const CONFIG_VERSION = 1;
+const CONFIG_VERSION = 2;
+const LEGACY_CONFIG_VERSION = 1;
 const DEFAULT_PRINCIPALS = ["codex", "claude", "novage", "novade"];
 
 function makeToken() {
@@ -105,6 +107,19 @@ export async function loadConfig(configPath = defaultConfigPath()) {
   }
 
   const config = JSON.parse(raw);
+  let upgradedCapabilities = false;
+  if (config.version === LEGACY_CONFIG_VERSION) {
+    for (const agent of config.agents || []) {
+      if (
+        Array.isArray(agent.capabilities) &&
+        !agent.capabilities.includes(CAPABILITIES.SCROLL)
+      ) {
+        agent.capabilities.push(CAPABILITIES.SCROLL);
+        upgradedCapabilities = true;
+      }
+    }
+    config.version = CONFIG_VERSION;
+  }
   const beforeTargets = JSON.stringify(config.security?.contributionTargets || []);
   if (config.security?.contributionTargets) {
     config.security.contributionTargets = hardenLegacyContributionTargets(
@@ -112,7 +127,10 @@ export async function loadConfig(configPath = defaultConfigPath()) {
     );
   }
   validateConfig(config);
-  if (JSON.stringify(config.security.contributionTargets) !== beforeTargets) {
+  if (
+    upgradedCapabilities ||
+    JSON.stringify(config.security.contributionTargets) !== beforeTargets
+  ) {
     const tempPath = `${configPath}.${process.pid}.security-upgrade.tmp`;
     await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
     await rename(tempPath, configPath);

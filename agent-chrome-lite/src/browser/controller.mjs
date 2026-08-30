@@ -7,7 +7,11 @@ import {
   isMainFrameLoadFailure,
   PageHealthState,
 } from "./page-health.mjs";
-import { readNodeMetadata, SnapshotStore } from "./snapshot.mjs";
+import {
+  readNodeMetadata,
+  resolveEditableFromSemanticHint,
+  SnapshotStore,
+} from "./snapshot.mjs";
 import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
 
 function delay(ms) {
@@ -72,6 +76,37 @@ function pointFromQuads(quads) {
     x: (quad[0] + quad[2] + quad[4] + quad[6]) / 4,
     y: (quad[1] + quad[3] + quad[5] + quad[7]) / 4,
   };
+}
+
+export function boundedScrollDelta({ direction, amount, viewportHeight }) {
+  const height = Math.max(1, Number(viewportHeight) || 1);
+  const distance = amount === "small"
+    ? Math.min(280, Math.max(120, Math.round(height * 0.3)))
+    : Math.min(720, Math.max(320, Math.round(height * 0.8)));
+  return direction === "up" ? -distance : distance;
+}
+
+export function documentEndState({ pageY, viewportHeight, contentHeight }) {
+  const viewport = Math.max(1, Number(viewportHeight) || 1);
+  const content = Math.max(viewport, Number(contentHeight) || viewport);
+  const scrollable = content > viewport + 2;
+  return {
+    scrollable,
+    reachedEnd:
+      scrollable &&
+      Math.max(0, Number(pageY) || 0) + viewport >= content - 2,
+  };
+}
+
+export function namedVisualAxNode(nodes = []) {
+  const named = nodes.filter((node) => String(node?.name?.value || "").trim());
+  return (
+    named.find((node) =>
+      /button|link|menuitem|checkbox|radio|switch/i.test(
+        String(node?.role?.value || ""),
+      ),
+    ) || named[0]
+  );
 }
 
 export class BrowserController extends EventEmitter {
@@ -328,14 +363,20 @@ export class BrowserController extends EventEmitter {
       y: Math.round(y),
       includeUserAgentShadowDOM: true,
     });
-    const backendNodeId = hit.backendNodeId;
-    if (!backendNodeId) throw new Error("No DOM node exists at the visual point");
-    const metadata = await readNodeMetadata(this.cdp, backendNodeId);
+    const hitBackendNodeId = hit.backendNodeId;
+    if (!hitBackendNodeId) throw new Error("No DOM node exists at the visual point");
+    const editable = await resolveEditableFromSemanticHint(
+      this.cdp,
+      hitBackendNodeId,
+      "",
+    ).catch(() => null);
+    const backendNodeId = editable?.backendNodeId || hitBackendNodeId;
+    const metadata = editable?.metadata || await readNodeMetadata(this.cdp, backendNodeId);
     const ax = await this.cdp.send("Accessibility.getPartialAXTree", {
       backendNodeId,
-      fetchRelatives: false,
+      fetchRelatives: true,
     });
-    const axNode = ax.nodes?.[0];
+    const axNode = namedVisualAxNode(ax.nodes) || ax.nodes?.[0];
     const node = {
       ...metadata,
       role: axNode?.role?.value || metadata.role || "control",
@@ -365,6 +406,85 @@ export class BrowserController extends EventEmitter {
   async clickVisual(point) {
     await this.clickPoint(point);
     return { ok: true };
+  }
+
+  async scroll({ direction, amount }) {
+    this.assertPageAvailable();
+    const maxSteps = amount === "bottom" ? 12 : 1;
+    let steps = 0;
+    let totalDeltaY = 0;
+    let reachedEnd = false;
+    let documentScrollRangeObserved = false;
+    for (let index = 0; index < maxSteps; index += 1) {
+      const metrics = await this.cdp.send("Page.getLayoutMetrics");
+      const viewport = metrics.cssLayoutViewport || metrics.layoutViewport || {};
+      const visual = metrics.cssVisualViewport || metrics.visualViewport || {};
+      const content = metrics.cssContentSize || metrics.contentSize || {};
+      const width = Math.max(1, Number(viewport.clientWidth) || 1);
+      const height = Math.max(1, Number(viewport.clientHeight) || 1);
+      const pageY = Math.max(0, Number(visual.pageY) || Number(viewport.pageY) || 0);
+      const contentHeight = Math.max(height, Number(content.height) || height);
+      const documentState = documentEndState({
+        pageY,
+        viewportHeight: height,
+        contentHeight,
+      });
+      const documentScrollable = documentState.scrollable;
+      documentScrollRangeObserved ||= documentScrollable;
+      if (
+        direction === "down" &&
+        documentState.reachedEnd
+      ) {
+        reachedEnd = true;
+        break;
+      }
+      const deltaY = boundedScrollDelta({
+        direction,
+        amount: amount === "bottom" ? "page" : amount,
+        viewportHeight: height,
+      });
+      await this.cdp.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        x: Math.round(width * 0.9),
+        y: Math.round(height / 2),
+        deltaX: 0,
+        deltaY,
+      });
+      steps += 1;
+      totalDeltaY += deltaY;
+      await delay(
+        amount === "bottom"
+          ? 420 + Math.floor(Math.random() * 260)
+          : 180,
+      );
+    }
+    if (
+      amount === "bottom" &&
+      !reachedEnd &&
+      documentScrollRangeObserved
+    ) {
+      const metrics = await this.cdp.send("Page.getLayoutMetrics");
+      const viewport = metrics.cssLayoutViewport || metrics.layoutViewport || {};
+      const visual = metrics.cssVisualViewport || metrics.visualViewport || {};
+      const content = metrics.cssContentSize || metrics.contentSize || {};
+      const height = Math.max(1, Number(viewport.clientHeight) || 1);
+      const pageY = Math.max(0, Number(visual.pageY) || Number(viewport.pageY) || 0);
+      const contentHeight = Math.max(height, Number(content.height) || height);
+      reachedEnd = documentEndState({
+        pageY,
+        viewportHeight: height,
+        contentHeight,
+      }).reachedEnd;
+    }
+    this.invalidate();
+    return {
+      ok: true,
+      direction,
+      amount,
+      steps,
+      reachedEnd,
+      deltaY: totalDeltaY,
+    };
   }
 
   async clickPoint({ x, y }) {
@@ -397,7 +517,39 @@ export class BrowserController extends EventEmitter {
 
   async fillRef(ref, value) {
     const { backendNodeId } = this.resolveRef(ref);
+    return this.fillBackendNode(backendNodeId, value);
+  }
+
+  async fillVisual(backendNodeId, value) {
+    return this.fillBackendNode(backendNodeId, value);
+  }
+
+  async fillBackendNode(backendNodeId, value) {
     await this.cdp.send("DOM.focus", { backendNodeId });
+    return this.fillFocused(value);
+  }
+
+  async fillVisualPoint(point, value) {
+    await this.clickVisual(point);
+    await delay(120);
+    this.webContents.selectAll();
+    await delay(90);
+    this.webContents.delete();
+    for (const character of String(value)) {
+      if (character === "\n") {
+        this.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+        await delay(45 + Math.floor(Math.random() * 55));
+        this.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+        continue;
+      }
+      this.webContents.insertText(character);
+      await delay(18 + Math.floor(Math.random() * 36));
+    }
+    this.invalidate();
+    return { ok: true, length: String(value).length };
+  }
+
+  async fillFocused(value) {
     const modifier = process.platform === "darwin" ? 4 : 2;
     await this.cdp.send("Input.dispatchKeyEvent", {
       type: "keyDown",
@@ -474,32 +626,54 @@ export class BrowserController extends EventEmitter {
         throw error;
       }
       mechanism = "semantic-trigger-file-chooser";
-      await this.cdp.send("Page.setInterceptFileChooserDialog", { enabled: true });
-      try {
-        const opened = this.cdp.waitFor("Page.fileChooserOpened", 8000);
-        await this.clickRef(ref);
-        const event = await opened;
-        fileInputBackendNodeId = event.backendNodeId;
-        if (!fileInputBackendNodeId) {
-          const error = new Error("File chooser did not expose its backing input node");
-          error.code = "invalid_upload_target";
-          throw error;
-        }
-        const metadata = await readNodeMetadata(this.cdp, fileInputBackendNodeId);
-        if (metadata.tag !== "input" || metadata.type !== "file") {
-          const error = new Error("File chooser target is not a native file input");
-          error.code = "invalid_upload_target";
-          throw error;
-        }
-      } finally {
-        await this.cdp
-          .send("Page.setInterceptFileChooserDialog", { enabled: false })
-          .catch(() => undefined);
-      }
+      fileInputBackendNodeId = await this.fileInputFromChooser(() =>
+        this.clickRef(ref),
+      );
     }
 
+    return this.setFileInputFiles(fileInputBackendNodeId, files, mechanism);
+  }
+
+  async uploadVisual(point, files) {
+    const fileInputBackendNodeId = await this.fileInputFromChooser(() =>
+      this.clickVisual(point),
+    );
+    return this.setFileInputFiles(
+      fileInputBackendNodeId,
+      files,
+      "visual-trigger-file-chooser",
+    );
+  }
+
+  async fileInputFromChooser(activate) {
+    await this.cdp.send("Page.setInterceptFileChooserDialog", { enabled: true });
+    try {
+      const opened = this.cdp.waitFor("Page.fileChooserOpened", 8000);
+      await activate();
+      const event = await opened;
+      const backendNodeId = event.backendNodeId;
+      if (!backendNodeId) {
+        const error = new Error("File chooser did not expose its backing input node");
+        error.code = "invalid_upload_target";
+        throw error;
+      }
+      const metadata = await readNodeMetadata(this.cdp, backendNodeId);
+      if (metadata.tag !== "input" || metadata.type !== "file") {
+        const error = new Error("File chooser target is not a native file input");
+        error.code = "invalid_upload_target";
+        throw error;
+      }
+      return backendNodeId;
+    } finally {
+      await this.cdp
+        .send("Page.setInterceptFileChooserDialog", { enabled: false })
+        .catch(() => undefined);
+    }
+  }
+
+  async setFileInputFiles(backendNodeId, files, mechanism) {
     await this.cdp.send("DOM.setFileInputFiles", {
-      backendNodeId: fileInputBackendNodeId,
+      backendNodeId,
       files,
     });
     this.invalidate();

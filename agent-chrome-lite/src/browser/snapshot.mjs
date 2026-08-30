@@ -93,6 +93,37 @@ function nearestBackendNodeId(node, nodesById) {
   return null;
 }
 
+export function nativeFileInputBackendIds(root, { maxNodes = 6000 } = {}) {
+  const result = [];
+  const pending = root ? [root] : [];
+  const seen = new Set();
+  let visited = 0;
+  while (pending.length && visited < maxNodes) {
+    const node = pending.shift();
+    if (!node || seen.has(node)) continue;
+    seen.add(node);
+    visited += 1;
+    const attributes = new Map();
+    for (let index = 0; index < (node.attributes || []).length; index += 2) {
+      attributes.set(
+        String(node.attributes[index] || "").toLowerCase(),
+        String(node.attributes[index + 1] || "").toLowerCase(),
+      );
+    }
+    if (
+      String(node.nodeName || node.localName || "").toLowerCase() === "input" &&
+      attributes.get("type") === "file" &&
+      node.backendNodeId
+    ) {
+      result.push(node.backendNodeId);
+    }
+    pending.push(...(node.children || []));
+    pending.push(...(node.shadowRoots || []));
+    if (node.contentDocument) pending.push(node.contentDocument);
+  }
+  return [...new Set(result)];
+}
+
 export function isReadOnlyLink(control, pageUrl) {
   if (control.role !== "link" || !control.href) return false;
   try {
@@ -369,13 +400,17 @@ export class SnapshotStore {
     // accessibility tree. They are still discovered from ignored AX nodes, then
     // bound to backendDOMNodeId for the CDP setFileInputFiles mechanism. No
     // selector, XPath, page script, or fixed coordinate is used as a locator.
-    if (contributionForm && controls.length < this.maxControls) {
+    if ((contributionForm || candidateHints.length > 0 || controls.length > 0) && controls.length < this.maxControls) {
+      const existingBackendNodeIds = new Set(
+        [...refs.values()].map((entry) => entry.backendNodeId),
+      );
       let inspected = 0;
       for (const node of nodes) {
         if (!node.ignored || !node.backendDOMNodeId || inspected >= 240) continue;
         inspected += 1;
         const metadata = await readNodeMetadata(cdp, node.backendDOMNodeId).catch(() => ({}));
         if (metadata.tag !== "input" || metadata.type !== "file") continue;
+        if (existingBackendNodeIds.has(node.backendDOMNodeId)) continue;
         const ref = `${epoch}:${controls.length + 1}`;
         const control = {
           ref,
@@ -388,11 +423,46 @@ export class SnapshotStore {
         delete control.visible;
         controls.push(control);
         refs.set(ref, { backendNodeId: node.backendDOMNodeId, node: control });
+        existingBackendNodeIds.add(node.backendDOMNodeId);
         if (controls.length >= this.maxControls) break;
+      }
+
+      // Frameworks sometimes hide native file inputs from the AX tree
+      // completely. Traverse the CDP DOM tree structurally and accept only
+      // INPUT elements whose type attribute is exactly file. The resulting
+      // backend node id is used by DOM.setFileInputFiles; CSS, XPath, page JS,
+      // text extraction and coordinates are not used as locator strategies.
+      if (controls.length < this.maxControls) {
+        const { root } = await cdp.send("DOM.getDocument", {
+          depth: -1,
+          pierce: true,
+        }).catch(() => ({ root: null }));
+        for (const backendNodeId of nativeFileInputBackendIds(root)) {
+          if (existingBackendNodeIds.has(backendNodeId)) continue;
+          const metadata = await readNodeMetadata(cdp, backendNodeId).catch(() => ({}));
+          if (metadata.tag !== "input" || metadata.type !== "file") continue;
+          const ref = `${epoch}:${controls.length + 1}`;
+          const control = {
+            ref,
+            role: "file",
+            name: metadata.ariaLabel || metadata.placeholder || metadata.title || "文件上传",
+            value: "",
+            disabled: Boolean(metadata.disabled),
+            ...metadata,
+          };
+          delete control.visible;
+          controls.push(control);
+          refs.set(ref, { backendNodeId, node: control });
+          existingBackendNodeIds.add(backendNodeId);
+          if (controls.length >= this.maxControls) break;
+        }
       }
     }
 
-    const hints = contributionForm ? candidateHints : [];
+    const hasContributionSurface = contributionForm || controls.some(
+      (control) => ["file", "upload"].includes(control.role),
+    );
+    const hints = hasContributionSurface ? candidateHints : [];
 
     this.epoch = epoch;
     this.refs = refs;

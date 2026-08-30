@@ -78,6 +78,24 @@ server.registerTool(
 );
 
 server.registerTool(
+  "browser_scroll",
+  {
+    description: "Scroll the current contribution page by a bounded human-sized step, or reach the bottom through a capped sequence of paced steps. It reads geometry only, never page content.",
+    inputSchema: {
+      direction: z.enum(["up", "down"]),
+      amount: z.enum(["small", "page", "bottom"]).default("page"),
+    },
+  },
+  async ({ direction, amount }) =>
+    textResult(
+      await api("/v1/actions/scroll", {
+        method: "POST",
+        body: JSON.stringify({ direction, amount }),
+      }),
+    ),
+);
+
+server.registerTool(
   "browser_click",
   {
     description: "Click a control by a fresh Snapshot ref. Irreversible, auth and credit actions are blocked by the daemon.",
@@ -108,6 +126,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "browser_fill_visual",
+  {
+    description: "Fill a verified editable control at a point from the current screenshot. The screenshot id expires in 60 seconds or after page change; passwords and verification inputs remain blocked.",
+    inputSchema: {
+      screenshotId: z.string().uuid(),
+      x: z.number().nonnegative(),
+      y: z.number().nonnegative(),
+      value: z.string().max(100_000),
+    },
+  },
+  async ({ screenshotId, x, y, value }) =>
+    textResult(
+      await api("/v1/actions/visual-fill", {
+        method: "POST",
+        body: JSON.stringify({ screenshotId, x, y, value }),
+      }),
+    ),
+);
+
+server.registerTool(
   "browser_upload",
   {
     description: "Bind one or more allowlisted local files to a native file input discovered by Snapshot.",
@@ -121,6 +159,26 @@ server.registerTool(
       await api("/v1/actions/upload", {
         method: "POST",
         body: JSON.stringify({ ref, files }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "browser_upload_visual",
+  {
+    description: "Upload through a visible control from the current screenshot. The screenshot id expires in 60 seconds or after page change; the resulting chooser must resolve to a native file input.",
+    inputSchema: {
+      screenshotId: z.string().uuid(),
+      x: z.number().nonnegative(),
+      y: z.number().nonnegative(),
+      files: z.array(z.string().min(1)).min(1).max(8),
+    },
+  },
+  async ({ screenshotId, x, y, files }) =>
+    textResult(
+      await api("/v1/actions/visual-upload", {
+        method: "POST",
+        body: JSON.stringify({ screenshotId, x, y, files }),
       }),
     ),
 );

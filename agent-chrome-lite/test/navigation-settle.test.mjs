@@ -6,6 +6,7 @@ import {
   BrowserController,
   contributionScopeTransition,
   isExpectedNavigationAbort,
+  namedVisualAxNode,
   waitForNavigationQuiet,
 } from "../src/browser/controller.mjs";
 
@@ -17,6 +18,16 @@ test("only Chromium redirect aborts are treated as expected", () => {
     true,
   );
   assert.equal(isExpectedNavigationAbort({ code: "ERR_NAME_NOT_RESOLVED" }), false);
+});
+
+test("visual targeting promotes the nearest named interactive AX ancestor", () => {
+  const node = namedVisualAxNode([
+    { role: { value: "generic" }, name: { value: "" } },
+    { role: { value: "StaticText" }, name: { value: "上传音频" } },
+    { role: { value: "button" }, name: { value: "上传音频" } },
+  ]);
+  assert.equal(node.role.value, "button");
+  assert.equal(node.name.value, "上传音频");
 });
 
 test("status preserves outside-scope handoff until the user explicitly clears it", () => {

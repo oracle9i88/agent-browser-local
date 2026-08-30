@@ -12,10 +12,13 @@ const HTTP_ROUTES = new Map([
   ["POST /v1/navigate", ["browser.navigate", (body) => body]],
   ["POST /v1/snapshot", ["browser.snapshot", () => ({})]],
   ["POST /v1/screenshot", ["browser.screenshot", () => ({})]],
+  ["POST /v1/actions/scroll", ["browser.scroll", (body) => body]],
   ["POST /v1/actions/click", ["browser.click", (body) => body]],
   ["POST /v1/actions/visual-click", ["browser.clickVisual", (body) => body]],
   ["POST /v1/actions/fill", ["browser.fill", (body) => body]],
+  ["POST /v1/actions/visual-fill", ["browser.fillVisual", (body) => body]],
   ["POST /v1/actions/upload", ["browser.upload", (body) => body]],
+  ["POST /v1/actions/visual-upload", ["browser.uploadVisual", (body) => body]],
   ["POST /v1/handoff", ["browser.handoff", (body) => body]],
 ]);
 

@@ -26,7 +26,7 @@ const config = {
       },
       {
         origin: "https://studio.ximalaya.com",
-        pathPrefixes: ["/uploadWorks"],
+        pathPrefixes: ["/upload", "/uploadWorks"],
       },
       {
         origin: "https://channels.weixin.qq.com",
@@ -64,6 +64,10 @@ test("allows only configured contribution surfaces", () => {
   );
   assert.equal(
     isContributionUrlAllowed(config, "https://studio.ximalaya.com/upload"),
+    true,
+  );
+  assert.equal(
+    isContributionUrlAllowed(config, "https://studio.ximalaya.com/uploading"),
     false,
   );
   assert.equal(

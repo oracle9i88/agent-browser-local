@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.9`（Public Preview）。
+当前版本：`v0.3.0-beta.12`（Public Preview）。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -19,7 +19,8 @@
 - Snapshot-first：通过 Chromium Accessibility/CDP 生成短期 `ref`，不向 Agent 暴露 CSS/XPath；评论、统计和记录型内容不进入 Snapshot。
 - `ref` 在每次动作、刷新或导航后失效。
 - 无名控件允许“当前截图动态定位”；截图 ID 60 秒过期，页面变化立即失效，禁止固定坐标。
-- 文件上传通过 Snapshot 找到原生文件输入；隐藏输入则从语义上传入口拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
+- 投稿页提供受权限控制的 `browser.scroll`：支持有限的人类步长，也支持最多 12 步、逐步节流的 `bottom`；只读取视口几何，不读取或导出页面正文，方向/步幅进入审计。普通文档能可靠回报 `reachedEnd`；SPA 内层滚动容器无法从文档几何证明到底时会返回 `false`，由下一张截图复核，禁止假报成功。
+- 文件上传通过 Snapshot 找到原生文件输入；隐藏输入可从语义上传入口或 60 秒有效的当前截图动态按钮拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
 - 创建、发布、提交和协议确认默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create、Get Stems/MIDI 仍不可委托。
@@ -97,6 +98,12 @@ curl -X POST \
   -H 'content-type: application/json' \
   --data '{}' \
   http://127.0.0.1:3767/v1/snapshot
+
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"direction":"down","amount":"bottom"}' \
+  http://127.0.0.1:3767/v1/actions/scroll
 ```
 
 WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: Bearer ...` 请求头里。消息格式：
@@ -115,7 +122,7 @@ ABL_TOKEN='对应 principal 的 token' \
 node "$PROJECT_DIR/mcp/server.mjs"
 ```
 
-工具只有：status、navigate、snapshot、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
+工具只有：status、navigate、snapshot、有限步长 scroll、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
 
 不把 token 写进 MCP 配置的固定 principal 启动方式见 [config/MCP-SETUP.md](config/MCP-SETUP.md)。
 
@@ -152,8 +159,8 @@ npm run agent-permissions -- --revoke-finalize codex
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.9`
-- GitHub：`codex/ximalaya-upload-beta9` 保存本版源码；tag 固定审计通过的提交。
+- Git tag：`v0.3.0-beta.12`（验收通过后创建）
+- GitHub：`codex/scroll-beta12` 保存本版源码；tag 在打包和验收通过后固定审计提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 
