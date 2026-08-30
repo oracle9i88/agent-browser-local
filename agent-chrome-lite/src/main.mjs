@@ -141,7 +141,7 @@ async function syncPendingExternalAuth() {
     cookieStore: browsingSession.cookies,
   });
   controller?.setHandoff(
-    `已同步 ${imported.count} 项 Suno 会话资料。页面正在刷新；确认已回到已登录页面后，再点击“我已接管”。`,
+    `已同步 ${imported.count} 项 Suno 会话资料。页面正在刷新；确认已回到已登录页面后，再点击“交还 Agent”。`,
     {
       code: "external_auth_synced",
       provider: pendingExternalAuth.provider,
@@ -335,7 +335,7 @@ async function createWindow(config) {
 
   await mainWindow.loadFile(path.join(sourceDir, "ui", "index.html"));
   const bridgeReady = await mainWindow.webContents.executeJavaScript(
-    "Boolean(window.agentBrowser && typeof window.agentBrowser.status === 'function' && typeof window.agentBrowser.clearHandoff === 'function')",
+    "Boolean(window.agentBrowser && typeof window.agentBrowser.status === 'function' && typeof window.agentBrowser.requestHandoff === 'function' && typeof window.agentBrowser.clearHandoff === 'function')",
   );
   if (!bridgeReady) {
     throw new Error("安全工具栏初始化失败：preload IPC bridge 不可用");
@@ -349,7 +349,7 @@ async function createWindow(config) {
     ? toolbarReady.state.startsWith("需要你接管：") &&
       toolbarReady.handoffHidden === false &&
       toolbarReady.handoffDisabled === false &&
-      toolbarReady.handoffText === "我已接管" &&
+      toolbarReady.handoffText === "交还 Agent" &&
       toolbarReady.handoffInToolbar === true
     : toolbarReady.state === "本地 daemon 启动中" &&
       toolbarReady.handoffHidden === false &&
@@ -383,6 +383,11 @@ function installIpc() {
   ipcMain.handle("browser:recover", () => controller.reload());
   ipcMain.handle("browser:open-external-auth", () => openPendingExternalAuth());
   ipcMain.handle("browser:sync-external-auth", () => syncPendingExternalAuth());
+  ipcMain.handle("browser:request-user-handoff", () =>
+    controller.setHandoff("用户已主动接管，Agent 自动化已暂停。", {
+      code: "user_takeover",
+    }),
+  );
   ipcMain.handle("browser:clear-handoff", () => {
     resetExternalAuthState();
     return controller.clearHandoff();
@@ -467,12 +472,12 @@ if (!singleInstance) {
         ? toolbarRunning.state.startsWith("需要你接管：") &&
           toolbarRunning.handoffHidden === false &&
           toolbarRunning.handoffDisabled === false &&
-          toolbarRunning.handoffText === "我已接管" &&
+          toolbarRunning.handoffText === "交还 Agent" &&
           toolbarRunning.handoffInToolbar === true
         : toolbarRunning.state.includes(`v${VERSION}`) &&
           toolbarRunning.handoffHidden === false &&
-          toolbarRunning.handoffDisabled === true &&
-          toolbarRunning.handoffText === "Agent 可操作" &&
+          toolbarRunning.handoffDisabled === false &&
+          toolbarRunning.handoffText === "我要接管" &&
           toolbarRunning.handoffInToolbar === true;
       if (!runningStateRendered) {
         throw new Error("安全工具栏初始化失败：daemon 就绪状态未渲染");

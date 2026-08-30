@@ -55,7 +55,8 @@ function render(state) {
     externalAuthSync.hidden = true;
     handoff.hidden = false;
     handoff.disabled = false;
-    handoff.textContent = "我已接管";
+    handoff.dataset.action = "resume";
+    handoff.textContent = "交还 Agent";
   } else if (state.handoff?.required) {
     agentState.textContent = `需要你接管：${state.handoff.reason}`;
     agentState.classList.add("needs-handoff");
@@ -65,7 +66,8 @@ function render(state) {
     externalAuthSync.hidden = true;
     handoff.hidden = false;
     handoff.disabled = false;
-    handoff.textContent = "我已接管";
+    handoff.dataset.action = "resume";
+    handoff.textContent = "交还 Agent";
   } else if (!state.daemon?.ready) {
     agentState.textContent = "本地 daemon 启动中";
     agentState.classList.remove("needs-handoff", "page-fault");
@@ -83,8 +85,9 @@ function render(state) {
     externalAuth.hidden = true;
     externalAuthSync.hidden = true;
     handoff.hidden = false;
-    handoff.disabled = true;
-    handoff.textContent = "Agent 可操作";
+    handoff.disabled = false;
+    handoff.dataset.action = "pause";
+    handoff.textContent = "我要接管";
   }
 }
 
@@ -114,7 +117,12 @@ externalAuthSync.addEventListener("click", async () => {
     externalAuthSync.disabled = false;
   }
 });
-handoff.addEventListener("click", () => window.agentBrowser.clearHandoff());
+handoff.addEventListener("click", () => {
+  if (handoff.dataset.action === "pause") {
+    return window.agentBrowser.requestHandoff();
+  }
+  return window.agentBrowser.clearHandoff();
+});
 
 window.agentBrowser.onState(render);
 window.agentBrowser.status().then(render);

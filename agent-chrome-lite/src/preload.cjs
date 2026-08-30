@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   recover: () => ipcRenderer.invoke("browser:recover"),
   openExternalAuth: () => ipcRenderer.invoke("browser:open-external-auth"),
   syncExternalAuth: () => ipcRenderer.invoke("browser:sync-external-auth"),
+  requestHandoff: () => ipcRenderer.invoke("browser:request-user-handoff"),
   clearHandoff: () => ipcRenderer.invoke("browser:clear-handoff"),
   migrationDetect: () => ipcRenderer.invoke("migration:detect"),
   migrationOffers: () => ipcRenderer.invoke("migration:offers"),
