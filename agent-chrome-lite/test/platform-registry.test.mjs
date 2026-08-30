@@ -16,7 +16,10 @@ test("xiaoyuzhou registry exposes one selected podcast, never the program list",
     {
       platform: "xiaoyuzhou",
       origin: "https://podcaster.xiaoyuzhoufm.com",
-      pathTemplates: ["/podcast/:podcastId"],
+      pathTemplates: [
+        "/podcast/:podcastId",
+        "/podcast/:podcastId/episode/create",
+      ],
       excludedTemplateValues: {
         podcastId: ["create", "new"],
       },

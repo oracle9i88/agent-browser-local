@@ -23,8 +23,13 @@ const PLATFORM_REGISTRY = Object.freeze({
         origin: "https://podcaster.xiaoyuzhoufm.com",
         // The /podcast root is an account/program collection. Program choice is
         // human-only; agents may act only after the user enters one concrete
-        // podcast workspace. The episode drawer stays on that exact URL.
-        pathTemplates: Object.freeze(["/podcast/:podcastId"]),
+        // podcast workspace. The only child route exposed is the verified
+        // single-episode creation form; lists, analytics and interaction stay
+        // outside contribution scope.
+        pathTemplates: Object.freeze([
+          "/podcast/:podcastId",
+          "/podcast/:podcastId/episode/create",
+        ]),
         excludedTemplateValues: Object.freeze({
           podcastId: Object.freeze(["create", "new"]),
         }),

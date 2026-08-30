@@ -12,7 +12,10 @@ const config = {
       },
       {
         origin: "https://podcaster.xiaoyuzhoufm.com",
-        pathTemplates: ["/podcast/:podcastId"],
+        pathTemplates: [
+          "/podcast/:podcastId",
+          "/podcast/:podcastId/episode/create",
+        ],
         excludedTemplateValues: {
           podcastId: ["create", "new"],
         },
@@ -58,6 +61,20 @@ test("allows only configured contribution surfaces", () => {
   assert.equal(
     isContributionUrlAllowed(config, "https://podcaster.xiaoyuzhoufm.com/podcast/123"),
     true,
+  );
+  assert.equal(
+    isContributionUrlAllowed(
+      config,
+      "https://podcaster.xiaoyuzhoufm.com/podcast/123/episode/create",
+    ),
+    true,
+  );
+  assert.equal(
+    isContributionUrlAllowed(
+      config,
+      "https://podcaster.xiaoyuzhoufm.com/podcast/123/episode",
+    ),
+    false,
   );
   assert.equal(
     isContributionUrlAllowed(config, "https://podcaster.xiaoyuzhoufm.com/podcast"),
