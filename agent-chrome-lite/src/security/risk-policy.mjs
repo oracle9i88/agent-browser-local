@@ -1,6 +1,11 @@
-const irreversibleWords = [
-  /(^|\s)(publish|post|submit|delete|trash|pay|purchase|buy|checkout|place order|confirm order)(\s|$)/i,
-  /创建(?:单集|歌曲)?|发布|发表|提交|上传|删除|移至垃圾箱|付款|支付|购买|下单|确认订单|立即发布/i,
+const finalizationWords = [
+  /(^|\s)(publish|post|submit)(\s|$)/i,
+  /创建(?:单集|歌曲)?|发布|发表|提交|上传(?:作品)?|立即发布/i,
+];
+
+const destructiveOrPaymentWords = [
+  /(^|\s)(delete|trash|pay|purchase|buy|checkout|place order|confirm order)(\s|$)/i,
+  /删除|移至垃圾箱|付款|支付|购买|下单|确认订单/i,
 ];
 
 const creditWords = [
@@ -149,7 +154,8 @@ export function classifyAction({ action, node, url }) {
     return {
       blocked: true,
       code: "legal_consent_required",
-      reason: "协议、条款或授权确认必须由用户本人完成。",
+      reason: "协议、条款或授权确认需要用户本人完成，或由本地权限表明确授予代发布权限的 Agent 执行。",
+      delegableCapability: "browser.finalize.ref",
     };
   }
   if (matchesAny(text, creditWords)) {
@@ -161,14 +167,22 @@ export function classifyAction({ action, node, url }) {
   }
 
   const isActionControl = ["button", "menuitem"].includes(role) || tag === "button";
+  if (isActionControl && matchesAny(text, destructiveOrPaymentWords)) {
+    return {
+      blocked: true,
+      code: "destructive_action_requires_handoff",
+      reason: "删除、支付、购买和下单等高风险动作必须由用户本人完成。",
+    };
+  }
   if (
     type === "submit" ||
-    (isActionControl && matchesAny(text, irreversibleWords))
+    (isActionControl && matchesAny(text, finalizationWords))
   ) {
     return {
       blocked: true,
       code: "irreversible_action_requires_handoff",
-      reason: "创建、提交、发布、删除、支付等不可逆动作必须由用户本人完成。",
+      reason: "创建、提交和发布需要用户本人完成，或由本地权限表明确授予代发布权限的 Agent 执行。",
+      delegableCapability: "browser.finalize.ref",
     };
   }
 

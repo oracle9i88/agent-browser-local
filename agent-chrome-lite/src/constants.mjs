@@ -1,5 +1,5 @@
 export const PRODUCT_NAME = "Agent Browser Local";
-export const VERSION = "0.3.0-beta.7";
+export const VERSION = "0.3.0-beta.8";
 
 export const CAPABILITIES = Object.freeze({
   STATUS: "browser.status",
@@ -10,9 +10,16 @@ export const CAPABILITIES = Object.freeze({
   CLICK_VISUAL: "browser.click.visual",
   FILL: "browser.fill.ref",
   UPLOAD: "browser.upload.ref",
+  FINALIZE: "browser.finalize.ref",
   HANDOFF: "browser.handoff",
 });
 
-export const DEFAULT_CAPABILITIES = Object.freeze(Object.values(CAPABILITIES));
+// Finalize is deliberately opt-in per locally configured principal. It is not
+// part of the capabilities created for a fresh installation.
+export const DEFAULT_CAPABILITIES = Object.freeze(
+  Object.values(CAPABILITIES).filter(
+    (capability) => capability !== CAPABILITIES.FINALIZE,
+  ),
+);
 
 export const CONFIRMATION_POLICY = "handoff-only";

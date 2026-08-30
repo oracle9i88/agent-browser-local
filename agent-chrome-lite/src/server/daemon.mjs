@@ -82,6 +82,18 @@ export class BrowserDaemon {
     throw new DaemonError(409, risk.code, risk.reason, { handoff });
   }
 
+  async recordDelegatedAction(identity, risk, context) {
+    await this.audit.record({
+      event: "action.delegated",
+      principal: identity.principal,
+      capability: risk.delegableCapability,
+      code: risk.code,
+      action: context.action,
+      ref: context.ref,
+      url: safeUrl(this.controller.status().url),
+    });
+  }
+
   async dispatch(identity, method, params = {}) {
     switch (method) {
       case "session.get":
@@ -160,10 +172,14 @@ export class BrowserDaemon {
           url: this.controller.status().url,
         });
         if (risk.blocked) {
-          return this.blocked(identity, risk, {
-            action: "click",
-            ref: params.ref,
-          });
+          const context = { action: "click", ref: params.ref };
+          if (
+            !risk.delegableCapability ||
+            !identity.capabilities.includes(risk.delegableCapability)
+          ) {
+            return this.blocked(identity, risk, context);
+          }
+          await this.recordDelegatedAction(identity, risk, context);
         }
         return this.executor.run(async () => {
           const result = await this.controller.clickRef(params.ref);

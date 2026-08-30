@@ -19,8 +19,10 @@ function fixture(node) {
       this.handoff = { required: true, reason, detail };
       return this.handoff;
     },
-    clickRef: async () => {
-      throw new Error("click must not execute");
+    clickCount: 0,
+    clickRef: async function () {
+      this.clickCount += 1;
+      return { ok: true };
     },
     fillRef: async () => ({ ok: true }),
     snapshot: async () => ({
@@ -67,7 +69,41 @@ test("daemon blocks irreversible controls before browser dispatch", async () => 
       error.code === "irreversible_action_requires_handoff",
   );
   assert.equal(controller.handoff.required, true);
+  assert.equal(controller.clickCount, 0);
   assert.equal(events[0].event, "action.blocked");
+});
+
+test("locally granted finalize capability permits and audits publishing", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "button",
+    role: "button",
+    type: "submit",
+    name: "创建",
+  });
+  identity.capabilities.push(CAPABILITIES.FINALIZE);
+
+  await daemon.dispatch(identity, "browser.click", { ref: "fresh:1" });
+
+  assert.equal(controller.clickCount, 1);
+  assert.equal(controller.handoff, null);
+  assert.equal(events[0].event, "action.delegated");
+  assert.equal(events[0].capability, CAPABILITIES.FINALIZE);
+  assert.equal(events[1].event, "browser.click");
+});
+
+test("finalize capability never authorizes deletion or payment", async () => {
+  const { controller, daemon, identity } = fixture({
+    tag: "button",
+    role: "button",
+    name: "删除",
+  });
+  identity.capabilities.push(CAPABILITIES.FINALIZE);
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.click", { ref: "fresh:1" }),
+    (error) => error.code === "destructive_action_requires_handoff",
+  );
+  assert.equal(controller.clickCount, 0);
 });
 
 test("agent cannot gain a capability by putting it in params", async () => {

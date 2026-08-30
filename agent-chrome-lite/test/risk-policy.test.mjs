@@ -16,6 +16,29 @@ test("blocks final submit and publish controls", () => {
   }
 });
 
+test("final submit and legal consent expose only the local finalize capability", () => {
+  for (const node of [
+    { tag: "button", role: "button", type: "submit", name: "创建" },
+    { tag: "input", role: "checkbox", name: "阅读并同意平台协议" },
+  ]) {
+    const risk = classifyAction({ action: "click", node });
+    assert.equal(risk.blocked, true);
+    assert.equal(risk.delegableCapability, "browser.finalize.ref");
+  }
+});
+
+test("deletion and payment can never use delegated finalize", () => {
+  for (const name of ["删除", "支付", "Confirm order"]) {
+    const risk = classifyAction({
+      action: "click",
+      node: { tag: "button", role: "button", name },
+    });
+    assert.equal(risk.blocked, true, name);
+    assert.equal(risk.code, "destructive_action_requires_handoff", name);
+    assert.equal(risk.delegableCapability, undefined, name);
+  }
+});
+
 test("blocks platform-specific final buttons named 发表 or 上传", () => {
   for (const name of ["发表", "上传", "上传作品"]) {
     const risk = classifyAction({
