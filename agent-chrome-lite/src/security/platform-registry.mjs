@@ -46,7 +46,7 @@ const PLATFORM_REGISTRY = Object.freeze({
       }),
       Object.freeze({
         origin: "https://studio.ximalaya.com",
-        pathPrefixes: Object.freeze(["/upload"]),
+        pathPrefixes: Object.freeze(["/uploadWorks"]),
       }),
     ]),
   }),

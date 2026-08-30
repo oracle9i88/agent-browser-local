@@ -26,7 +26,7 @@ const config = {
       },
       {
         origin: "https://studio.ximalaya.com",
-        pathPrefixes: ["/upload"],
+        pathPrefixes: ["/uploadWorks"],
       },
       {
         origin: "https://channels.weixin.qq.com",
@@ -58,6 +58,14 @@ const config = {
 
 test("allows only configured contribution surfaces", () => {
   assert.equal(isContributionUrlAllowed(config, "https://suno.com/create"), true);
+  assert.equal(
+    isContributionUrlAllowed(config, "https://studio.ximalaya.com/uploadWorks"),
+    true,
+  );
+  assert.equal(
+    isContributionUrlAllowed(config, "https://studio.ximalaya.com/upload"),
+    false,
+  );
   assert.equal(
     isContributionUrlAllowed(config, "https://podcaster.xiaoyuzhoufm.com/podcast/123"),
     true,
@@ -108,10 +116,6 @@ test("allows only configured contribution surfaces", () => {
       config,
       "https://www.ximalaya.com/reform-upload/page/upload",
     ),
-    true,
-  );
-  assert.equal(
-    isContributionUrlAllowed(config, "https://studio.ximalaya.com/upload"),
     true,
   );
   assert.equal(

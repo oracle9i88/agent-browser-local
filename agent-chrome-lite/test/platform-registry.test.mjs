@@ -37,7 +37,7 @@ test("ximalaya registry exposes only verified contribution entry paths", () => {
     {
       platform: "ximalaya",
       origin: "https://studio.ximalaya.com",
-      pathPrefixes: ["/upload"],
+      pathPrefixes: ["/uploadWorks"],
     },
   ]);
 });

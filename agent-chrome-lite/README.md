@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.8`（Public Preview）。
+当前版本：`v0.3.0-beta.9`（Public Preview）。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -152,8 +152,8 @@ npm run agent-permissions -- --revoke-finalize codex
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.8`
-- GitHub：`codex/delegated-finalize-beta8` 保存本版源码；tag 固定审计通过的提交。
+- Git tag：`v0.3.0-beta.9`
+- GitHub：`codex/ximalaya-upload-beta9` 保存本版源码；tag 固定审计通过的提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 
