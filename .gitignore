@@ -1,9 +1,7 @@
-node_modules/
-runtime/
-dist/
-.agent-browser/
-coverage/
-*.log
-.DS_Store
-__pycache__/
-*.pyc
+# Keep this root Git repository scoped to its actual tracked project.
+# The workspace also contains large, unrelated media and project directories;
+# excluding them prevents Codex snapshot indexes from hashing those files.
+/*
+!/.gitignore
+!/agent-chrome-lite/
+

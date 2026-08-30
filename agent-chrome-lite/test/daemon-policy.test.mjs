@@ -1,0 +1,322 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { BrowserDaemon, DaemonError } from "../src/server/daemon.mjs";
+import { CAPABILITIES, CONFIRMATION_POLICY } from "../src/constants.mjs";
+
+function fixture(node) {
+  const events = [];
+  const controller = {
+    handoff: null,
+    status() {
+      return {
+        url: "https://example.test/create",
+        handoff: this.handoff,
+      };
+    },
+    resolveRef: () => ({ backendNodeId: 1, node }),
+    resolveVisualPoint: async () => ({
+      point: { x: 900, y: 422 },
+      node,
+    }),
+    setHandoff(reason, detail) {
+      this.handoff = { required: true, reason, detail };
+      return this.handoff;
+    },
+    clearHandoff() {
+      this.handoff = null;
+      return null;
+    },
+    clickCount: 0,
+    clickRef: async function () {
+      this.clickCount += 1;
+      return { ok: true };
+    },
+    clickVisual: async function () {
+      this.clickCount += 1;
+      return { ok: true };
+    },
+    scrollCount: 0,
+    scroll: async function ({ direction, amount }) {
+      this.scrollCount += 1;
+      return {
+        ok: true,
+        direction,
+        amount,
+        steps: amount === "bottom" ? 3 : 1,
+        reachedEnd: amount === "bottom",
+        deltaY: amount === "bottom" ? 1920 : 640,
+      };
+    },
+    fillRef: async () => ({ ok: true }),
+    snapshot: async () => ({
+      snapshotId: "snapshot01",
+      url: "https://example.test/create",
+      controls: [],
+      hints: [],
+    }),
+  };
+  const daemon = new BrowserDaemon({
+    controller,
+    config: {
+      security: {
+        uploadRoots: [],
+        contributionTargets: [
+          { origin: "https://example.test", pathPrefixes: ["/create"] },
+        ],
+      },
+    },
+    executor: { run: (task) => task() },
+    audit: { record: async (event) => events.push(event) },
+  });
+  const identity = {
+    principal: "codex",
+    capabilities: [CAPABILITIES.CLICK],
+    confirmationPolicy: CONFIRMATION_POLICY,
+  };
+  return { controller, daemon, events, identity };
+}
+
+test("daemon blocks irreversible controls before browser dispatch", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "button",
+    role: "button",
+    type: "submit",
+    name: "创建",
+  });
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.click", { ref: "fresh:1" }),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 409 &&
+      error.code === "irreversible_action_requires_handoff",
+  );
+  assert.equal(controller.handoff.required, true);
+  assert.equal(controller.clickCount, 0);
+  assert.equal(events[0].event, "action.blocked");
+});
+
+test("locally granted finalize capability permits and audits publishing", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "button",
+    role: "button",
+    type: "submit",
+    name: "创建",
+  });
+  identity.capabilities.push(CAPABILITIES.FINALIZE);
+
+  await daemon.dispatch(identity, "browser.click", { ref: "fresh:1" });
+
+  assert.equal(controller.clickCount, 1);
+  assert.equal(controller.handoff, null);
+  assert.equal(events[0].event, "action.delegated");
+  assert.equal(events[0].capability, CAPABILITIES.FINALIZE);
+  assert.equal(events[1].event, "browser.click");
+});
+
+test("locally granted finalize capability also permits visual publishing", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "button",
+    role: "button",
+    type: "submit",
+    name: "确认发布",
+  });
+  identity.capabilities.push(CAPABILITIES.CLICK_VISUAL, CAPABILITIES.FINALIZE);
+
+  await daemon.dispatch(identity, "browser.clickVisual", {
+    screenshotId: "fresh-visual-1",
+    x: 900,
+    y: 422,
+  });
+
+  assert.equal(controller.clickCount, 1);
+  assert.equal(controller.handoff, null);
+  assert.equal(events[0].event, "action.delegated");
+  assert.equal(events[0].capability, CAPABILITIES.FINALIZE);
+  assert.equal(events[1].event, "browser.clickVisual");
+});
+
+test("finalize capability never authorizes deletion or payment", async () => {
+  const { controller, daemon, identity } = fixture({
+    tag: "button",
+    role: "button",
+    name: "删除",
+  });
+  identity.capabilities.push(CAPABILITIES.FINALIZE);
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.click", { ref: "fresh:1" }),
+    (error) => error.code === "destructive_action_requires_handoff",
+  );
+  assert.equal(controller.clickCount, 0);
+});
+
+test("agent cannot gain a capability by putting it in params", async () => {
+  const { daemon, identity } = fixture({
+    tag: "input",
+    type: "text",
+    role: "textbox",
+  });
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.fill", {
+      ref: "fresh:1",
+      value: "hello",
+      capabilities: [CAPABILITIES.FILL],
+    }),
+    (error) => error.code === "capability_denied",
+  );
+});
+
+test("daemon permits only bounded audited scrolling on contribution pages", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "body",
+    role: "document",
+  });
+  identity.capabilities.push(CAPABILITIES.SCROLL);
+
+  const result = await daemon.dispatch(identity, "browser.scroll", {
+    direction: "down",
+    amount: "page",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(controller.scrollCount, 1);
+  assert.equal(events[0].event, "browser.scroll");
+  assert.equal(events[0].direction, "down");
+  assert.equal(events[0].amount, "page");
+  assert.equal(events[0].url, "https://example.test/create");
+
+  const bottom = await daemon.dispatch(identity, "browser.scroll", {
+    direction: "down",
+    amount: "bottom",
+  });
+  assert.equal(bottom.reachedEnd, true);
+  assert.equal(bottom.steps, 3);
+  assert.equal(controller.scrollCount, 2);
+});
+
+test("daemon rejects unbounded or ambiguous scroll requests", async () => {
+  const { controller, daemon, identity } = fixture({
+    tag: "body",
+    role: "document",
+  });
+  identity.capabilities.push(CAPABILITIES.SCROLL);
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.scroll", {
+      direction: "bottom",
+      amount: "all",
+    }),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 400 &&
+      error.code === "invalid_scroll_direction",
+  );
+  assert.equal(controller.scrollCount, 0);
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.scroll", {
+      direction: "up",
+      amount: "bottom",
+    }),
+    (error) => error.code === "invalid_scroll_combination",
+  );
+  assert.equal(controller.scrollCount, 0);
+});
+
+test("pending handoff freezes browser automation until the human clears it", async () => {
+  const { controller, daemon, identity } = fixture({
+    tag: "button",
+    role: "button",
+    type: "button",
+    name: "继续编辑",
+  });
+  controller.handoff = {
+    required: true,
+    reason: "用户正在登录",
+    detail: { code: "outside_contribution_scope" },
+  };
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.click", { ref: "fresh:1" }),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 409 &&
+      error.code === "handoff_pending",
+  );
+});
+
+test("finalize principal auto-resumes an outside-scope redirect after it returns to contribution scope", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "input",
+    type: "text",
+    role: "textbox",
+  });
+  identity.capabilities.push(CAPABILITIES.SNAPSHOT, CAPABILITIES.FINALIZE);
+  controller.handoff = {
+    required: true,
+    reason: "页面离开投稿范围",
+    detail: { code: "outside_contribution_scope" },
+  };
+
+  await daemon.dispatch(identity, "browser.snapshot");
+
+  assert.equal(controller.handoff, null);
+  assert.equal(events[0].event, "handoff.auto_resumed");
+  assert.equal(events[1].event, "browser.snapshot");
+});
+
+test("snapshot freezes automation when an in-page login surface keeps an allowed URL", async () => {
+  const { controller, daemon, events, identity } = fixture({
+    tag: "input",
+    type: "text",
+    role: "textbox",
+  });
+  identity.capabilities.push(CAPABILITIES.SNAPSHOT);
+  controller.snapshot = async () => ({
+    snapshotId: "login01",
+    url: "https://example.test/create",
+    controls: [
+      {
+        ref: "login01:1",
+        tag: "input",
+        type: "tel",
+        role: "textbox",
+        placeholder: "请输入验证码",
+      },
+    ],
+    hints: [],
+  });
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.snapshot"),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 409 &&
+      error.code === "manual_auth_surface_requires_handoff",
+  );
+  assert.equal(controller.handoff.required, true);
+  assert.equal(events[0].event, "action.blocked");
+  assert.equal(events[0].action, "snapshot");
+});
+
+test("fill audit never copies content-derived accessibility names", async () => {
+  const secret = "第一段：不应进入审计的正文";
+  const { daemon, events, identity } = fixture({
+    tag: "div",
+    role: "textbox",
+    name: secret,
+    contentEditable: true,
+  });
+  identity.capabilities.push(CAPABILITIES.FILL);
+
+  await daemon.dispatch(identity, "browser.fill", {
+    ref: "fresh:1",
+    value: secret,
+  });
+
+  assert.equal(events[0].field, "textbox");
+  assert.equal(events[0].name, undefined);
+  assert.equal(events[0].value, secret);
+});
