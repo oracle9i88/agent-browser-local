@@ -15,8 +15,7 @@ body {
 
 .toolbar {
   height: 64px;
-  display: grid;
-  grid-template-columns: auto auto minmax(280px, 1fr) auto auto;
+  display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -61,6 +60,8 @@ button:hover:not(:disabled) { background: #292e38; }
 button:disabled { color: #666d79; }
 
 .address-form {
+  flex: 1 1 420px;
+  min-width: 180px;
   height: 40px;
   display: flex;
   align-items: center;
@@ -95,6 +96,8 @@ button:disabled { color: #666d79; }
 }
 
 .agent-state {
+  flex: 0 1 290px;
+  min-width: 0;
   max-width: 290px;
   overflow: hidden;
   color: #9ca6b7;
@@ -110,6 +113,7 @@ button:disabled { color: #666d79; }
 .external-auth,
 .external-auth-sync,
 .recovery {
+  flex: 0 0 auto;
   padding: 0 12px;
   border-color: #705a2c;
   color: #ffdb8a;
@@ -126,6 +130,7 @@ button:disabled { color: #666d79; }
 /* ---- 迁移向导（Chrome → Agent 登录态迁移） ---- */
 
 .migration-toggle {
+  flex: 0 0 auto;
   padding: 0 12px;
   border-color: #2f5c44;
   color: #9fe8c0;

@@ -40,7 +40,6 @@ export function isExpectedNavigationAbort(error) {
 
 export function contributionScopeTransition(config, url, handoff) {
   if (!isContributionUrlAllowed(config, url)) return "handoff";
-  if (handoff?.detail?.code === "outside_contribution_scope") return "clear";
   return "unchanged";
 }
 
@@ -105,8 +104,6 @@ export class BrowserController extends EventEmitter {
         this.setHandoff("当前页面需要用户本人完成登录、验证或人工导航。", {
           code: "outside_contribution_scope",
         });
-      } else if (transition === "clear") {
-        this.clearHandoff();
       }
     };
 
@@ -172,12 +169,6 @@ export class BrowserController extends EventEmitter {
 
   status() {
     const currentUrl = this.webContents.getURL();
-    if (
-      contributionScopeTransition(this.config, currentUrl, this.handoff) ===
-      "clear"
-    ) {
-      this.handoff = null;
-    }
     return {
       title: this.webContents.getTitle(),
       url: currentUrl,
@@ -232,13 +223,6 @@ export class BrowserController extends EventEmitter {
       isLoading: () => this.webContents.isLoading(),
       lastActivityAt: () => this.lastNavigationActivityAt,
     });
-    const finalUrl = this.webContents.getURL();
-    if (
-      contributionScopeTransition(this.config, finalUrl, this.handoff) ===
-      "clear"
-    ) {
-      this.clearHandoff();
-    }
     return this.status();
   }
 

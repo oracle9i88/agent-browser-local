@@ -19,7 +19,7 @@ test("only Chromium redirect aborts are treated as expected", () => {
   assert.equal(isExpectedNavigationAbort({ code: "ERR_NAME_NOT_RESOLVED" }), false);
 });
 
-test("status lazily clears stale outside-scope handoff on the final allowed URL", () => {
+test("status preserves outside-scope handoff until the user explicitly clears it", () => {
   const webContents = new EventEmitter();
   webContents.getURL = () =>
     "https://channels.weixin.qq.com/platform/post/create";
@@ -47,7 +47,10 @@ test("status lazily clears stale outside-scope handoff on the final allowed URL"
     detail: { code: "outside_contribution_scope" },
   };
 
-  assert.equal(controller.status().handoff, null);
+  assert.equal(
+    controller.status().handoff.detail.code,
+    "outside_contribution_scope",
+  );
   controller.handoff = {
     required: true,
     detail: { code: "manual_auth_surface_requires_handoff" },
@@ -102,7 +105,7 @@ test("navigation settle fails closed after its bounded timeout", async () => {
   assert.equal(now, 500);
 });
 
-test("SPA transition into an allowed contribution page clears only outside-scope handoff", () => {
+test("returning to an allowed contribution page never clears a pending handoff", () => {
   const config = {
     security: {
       contributionTargets: [
@@ -128,7 +131,7 @@ test("SPA transition into an allowed contribution page clears only outside-scope
       "https://creator.douyin.com/creator-micro/content/upload",
       outside,
     ),
-    "clear",
+    "unchanged",
   );
   assert.equal(
     contributionScopeTransition(

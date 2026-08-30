@@ -232,11 +232,22 @@ async function waitForToolbarChange(previousState) {
     `new Promise((resolve) => {
       const startedAt = Date.now();
       const inspect = () => {
+        const toolbar = document.querySelector(".toolbar")?.getBoundingClientRect();
+        const handoff = document.querySelector("#handoff");
+        const handoffRect = handoff?.getBoundingClientRect();
         const result = {
           state: document.querySelector("#agent-state")?.textContent || "",
-          handoffHidden: document.querySelector("#handoff")?.hidden,
-          handoffDisabled: document.querySelector("#handoff")?.disabled,
-          handoffText: document.querySelector("#handoff")?.textContent || ""
+          handoffHidden: handoff?.hidden,
+          handoffDisabled: handoff?.disabled,
+          handoffText: handoff?.textContent || "",
+          handoffInToolbar: Boolean(
+            toolbar && handoffRect &&
+            handoffRect.width > 0 && handoffRect.height > 0 &&
+            handoffRect.left >= toolbar.left &&
+            handoffRect.right <= toolbar.right &&
+            handoffRect.top >= toolbar.top &&
+            handoffRect.bottom <= toolbar.bottom
+          )
         };
         if (result.state !== ${JSON.stringify(previousState)} || Date.now() - startedAt >= 1000) {
           resolve(result);
@@ -338,11 +349,13 @@ async function createWindow(config) {
     ? toolbarReady.state.startsWith("需要你接管：") &&
       toolbarReady.handoffHidden === false &&
       toolbarReady.handoffDisabled === false &&
-      toolbarReady.handoffText === "我已接管"
+      toolbarReady.handoffText === "我已接管" &&
+      toolbarReady.handoffInToolbar === true
     : toolbarReady.state === "本地 daemon 启动中" &&
       toolbarReady.handoffHidden === false &&
       toolbarReady.handoffDisabled === true &&
-      toolbarReady.handoffText === "Agent 未就绪";
+      toolbarReady.handoffText === "Agent 未就绪" &&
+      toolbarReady.handoffInToolbar === true;
   if (!expectedStateRendered) {
     throw new Error("安全工具栏初始化失败：启动状态未渲染");
   }
@@ -454,11 +467,13 @@ if (!singleInstance) {
         ? toolbarRunning.state.startsWith("需要你接管：") &&
           toolbarRunning.handoffHidden === false &&
           toolbarRunning.handoffDisabled === false &&
-          toolbarRunning.handoffText === "我已接管"
+          toolbarRunning.handoffText === "我已接管" &&
+          toolbarRunning.handoffInToolbar === true
         : toolbarRunning.state.includes(`v${VERSION}`) &&
           toolbarRunning.handoffHidden === false &&
           toolbarRunning.handoffDisabled === true &&
-          toolbarRunning.handoffText === "Agent 可操作";
+          toolbarRunning.handoffText === "Agent 可操作" &&
+          toolbarRunning.handoffInToolbar === true;
       if (!runningStateRendered) {
         throw new Error("安全工具栏初始化失败：daemon 就绪状态未渲染");
       }
