@@ -235,4 +235,49 @@ server.registerTool(
     ),
 );
 
+server.registerTool(
+  "browser_capture_series",
+  {
+    description:
+      "Loop screenshot -> scroll (via coords anchor) -> repeat for one Suno Studio song, until the inner track panel stops moving or maxShots is hit. Per-song folder under ~/.agent-browser-local/captures/.",
+    inputSchema: {
+      label: z.string().max(200).default(""),
+      maxShots: z.number().int().min(1).max(60).default(12),
+      anchor: z
+        .object({
+          kind: z.literal("coords"),
+          x: z.number().min(0).max(1),
+          y: z.number().min(0).max(1),
+        })
+        .optional(),
+    },
+  },
+  async ({ label, maxShots, anchor }) =>
+    textResult(
+      await api("/v1/actions/capture-series", {
+        method: "POST",
+        body: JSON.stringify({ label, maxShots, anchor }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "browser_download_status",
+  {
+    description:
+      "List in-flight and completed Suno Studio stem downloads handled by the local will-download shim. Pass downloadId to fetch one record.",
+    inputSchema: {
+      downloadId: z.string().min(1).optional(),
+      includeCompleted: z.boolean().default(false),
+    },
+  },
+  async ({ downloadId, includeCompleted }) =>
+    textResult(
+      await api("/v1/actions/download-status", {
+        method: "POST",
+        body: JSON.stringify({ downloadId, includeCompleted }),
+      }),
+    ),
+);
+
 await server.connect(new StdioServerTransport());

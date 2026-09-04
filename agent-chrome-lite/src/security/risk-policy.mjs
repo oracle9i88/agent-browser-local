@@ -9,13 +9,18 @@ const destructiveOrPaymentWords = [
 ];
 
 const creditWords = [
-  /get\s+stems?\s*\/\s*midi/i,
   /create\s+song/i,
   /remaster/i,
   /add\s+(?:instrumental|vocal)/i,
   /replace\s+section/i,
   /生成(?:歌曲|音乐|分轨|midi)/i,
 ];
+
+// Get Stems/MIDI 单独成组：下载用户已生成内容的分轨，不生成新内容、
+// 不消耗生成积分（Suno Studio 下载在 2026-09 ToS 下不限量）。
+// 从"不可委托"降为"finalize 权限门"——只有本地权限表明确授予
+// browser.finalize.ref 的 principal 才能代点，逐次写入审计。
+const stemDownloadWords = [/get\s+stems?\s*\/\s*midi/i];
 
 const authWords = [
   /sign\s*in|log\s*in|verify|verification|captcha|one[- ]time code/i,
@@ -155,6 +160,15 @@ export function classifyAction({ action, node, url }) {
       blocked: true,
       code: "legal_consent_required",
       reason: "协议、条款或授权确认需要用户本人完成，或由本地权限表明确授予代发布权限的 Agent 执行。",
+      delegableCapability: "browser.finalize.ref",
+    };
+  }
+  if (matchesAny(text, stemDownloadWords)) {
+    return {
+      blocked: true,
+      code: "stem_download_requires_finalize",
+      reason:
+        "下载分轨（Get Stems/MIDI）需要本地权限表明确授予 browser.finalize.ref 的 Agent 执行，或由用户本人完成。",
       delegableCapability: "browser.finalize.ref",
     };
   }

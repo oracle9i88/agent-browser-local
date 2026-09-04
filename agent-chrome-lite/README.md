@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.12`（Public Preview）。
+当前版本：`v0.3.0-beta.13`（Public Preview）。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -20,10 +20,13 @@
 - `ref` 在每次动作、刷新或导航后失效。
 - 无名控件允许“当前截图动态定位”；截图 ID 60 秒过期，页面变化立即失效，禁止固定坐标。
 - 投稿页提供受权限控制的 `browser.scroll`：支持有限的人类步长，也支持最多 12 步、逐步节流的 `bottom`；只读取视口几何，不读取或导出页面正文，方向/步幅进入审计。普通文档能可靠回报 `reachedEnd`；SPA 内层滚动容器无法从文档几何证明到底时会返回 `false`，由下一张截图复核，禁止假报成功。
+- `browser.captureSeries` 把滚动截屏拆成一连串可视化证据：daemon 循环截图 → 落盘到 `~/.agent-browser-local/captures/<label>-<timestamp>/shot-NN.png` → 按歌建文件夹，每歌自动命名；scroll 通过 `{ anchor: { kind: "coords", x, y } }` 把滚轮锚点打到 Suno Studio 左侧内层轨道面板，连续两次无位移即认为到底。每张截图的 pageY / viewportHeight / URL 都写进 `manifest.json`，方便 Agent 复核位置；不再拼长图、不再顺手整理笔记。
+- `session.on('will-download')` 接管 Suno Studio 的 stem / MIDI 下载：写文件直接落到 `~/Downloads/<safe-name>`，系统保存对话框不再弹出；`browser.downloadStatus` 返回当前在飞 / 已完成的下载记录（含 savePath、bytes、状态），用于 Kimi 校验"今天到底下到哪几轨"。
 - 文件上传通过 Snapshot 找到原生文件输入；隐藏输入可从语义上传入口或 60 秒有效的当前截图动态按钮拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
-- 创建、发布、提交和协议确认默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create、Get Stems/MIDI 仍不可委托。
+- 创删、提交和发布默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create 仍不可委托。
+- Suno Studio 的 `Get Stems/MIDI` 不再走 credit handoff：按 2026-09 Suno ToS Studio 下载为 approved channel（不限量），降为 finalize 权限门；本机维护者可向指定 principal 授予 `browser.finalize.ref` 以代点下载，按钮仍按 risk-policy 触发需要 finalize 的代码路径并逐次写入审计。
 - 人机验证、CAPTCHA、“我不是机器人”和类似安全检查永远由用户本人完成；Agent 只负责识别、暂停和提示，不会自动勾选或尝试绕过。
 - 单队列、人类节奏执行和 JSONL 审计。
 - MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
@@ -104,6 +107,20 @@ curl -X POST \
   -H 'content-type: application/json' \
   --data '{"direction":"down","amount":"bottom"}' \
   http://127.0.0.1:3767/v1/actions/scroll
+
+# 滚动截屏：按歌建文件夹，自动滚到底或 maxShots 为止
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"label":"Tragic Grandeur","anchor":{"kind":"coords","x":0.2,"y":0.5},"maxShots":12}' \
+  http://127.0.0.1:3767/v1/actions/captureSeries
+
+# 下载进度查询（Kimi 校验今天到底下到哪几轨）
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{}' \
+  http://127.0.0.1:3767/v1/actions/downloadStatus
 ```
 
 WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: Bearer ...` 请求头里。消息格式：
@@ -111,6 +128,15 @@ WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: B
 ```json
 {"id":"1","method":"browser.snapshot","params":{}}
 ```
+
+## Suno Studio 工作流（agent 验收）
+
+Suno Studio 的滚动截屏和 stem 下载不是普通页面交互；下面的步骤是 Kimi 在 `podcaster.suno.com` 上做滚动截屏 + 下载分轨的官方做法，任何一步跳过都会让 captureSeries / downloadStatus 返回不可信结果。
+
+1. **登录与 dismiss**：首次进 Suno Studio 时右下角会浮出 "What's This?" 帮助层，必须先由用户本人点 Dismiss（Agent 不代勾也不会自动隐藏）。Dismiss 后浮层消失，左侧轨道面板才进入完整滚动模式。
+2. **滚动截屏**：`browser.captureSeries` 必传 `anchor: { kind: "coords", x: 0.18, y: 0.5 }`（约 Studio 左侧面板中段）；`label` 由 Kimi 看第一屏截图读出歌名后传入，写入 `~/.agent-browser-local/captures/<label>-<时间戳>/shot-NN.png`。
+3. **下载分轨**：每个 clip 左上角的设置小图标触发 Get Stems，按钮被 risk-policy 识别为 `stem_download_requires_finalize`。只有本地权限表授予 `browser.finalize.ref` 的 principal 能代点下载；本机维护者用 `npm run agent-permissions -- --grant-finalize <principal>` 一次性授权。下载直接落到 `~/Downloads/`，下载完成时间由 `browser.downloadStatus` 报告。
+4. **复核位置**：manifest.json 里每屏的 pageY / viewportHeight / URL 都记下来；如果最后一屏 pageY 接近 viewportHeight 而 stopReason 不是 `reached_end`，说明到底判断失败，应让 Kimi 重跑一次或换 anchor 坐标。
 
 ## MCP
 
@@ -159,7 +185,7 @@ npm run agent-permissions -- --revoke-finalize codex
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.12`（验收通过后创建）
+- Git tag：`v0.3.0-beta.13`（验收通过后创建）
 - GitHub：`codex/scroll-beta12` 保存本版源码；tag 在打包和验收通过后固定审计提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 
 import { CdpSession } from "./cdp-session.mjs";
@@ -12,7 +13,29 @@ import {
   resolveEditableFromSemanticHint,
   SnapshotStore,
 } from "./snapshot.mjs";
+import { CaptureStore, sanitizeCaptureLabel } from "./capture-store.mjs";
 import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
+
+const DEFAULT_DOWNLOADS_DIR = path.join(os.homedir(), "Downloads");
+
+function parseAnchor(anchor) {
+  // anchor 形如 { kind: "coords", x: 0.9, y: 0.5 }
+  // 本项目禁止任意 JS evaluate / CSS selector 接口，所以只接坐标锚点。
+  // 留 kind 是为未来 extension 协议占位；非 coords 一律拒绝。
+  if (!anchor || typeof anchor !== "object") return null;
+  if (anchor.kind && anchor.kind !== "coords") {
+    throw new Error(
+      "Scroll anchor must be coordinates (kind='coords'); CSS/XPath selectors are not allowed",
+    );
+  }
+  const x = Number(anchor.x);
+  const y = Number(anchor.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return {
+    x: Math.min(1, Math.max(0, x)),
+    y: Math.min(1, Math.max(0, y)),
+  };
+}
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,7 +133,11 @@ export function namedVisualAxNode(nodes = []) {
 }
 
 export class BrowserController extends EventEmitter {
-  constructor(webContents, config, { allowFileUrls = false } = {}) {
+  constructor(
+    webContents,
+    config,
+    { allowFileUrls = false, capturesDir, downloadsDir } = {},
+  ) {
     super();
     this.webContents = webContents;
     this.config = config;
@@ -128,6 +155,13 @@ export class BrowserController extends EventEmitter {
     this.screenshotState = null;
     this.handoff = null;
     this.lastNavigationActivityAt = Date.now();
+
+    const runtimeDir =
+      capturesDir || path.join(os.homedir(), ".agent-browser-local", "captures");
+    this.captureStore = new CaptureStore(runtimeDir);
+    this.downloadsDir = downloadsDir || DEFAULT_DOWNLOADS_DIR;
+    this.downloads = new Map(); // downloadId → record
+    this.downloadCounter = 0;
 
     const reconcileContributionScope = (url) => {
       const transition = contributionScopeTransition(
@@ -182,6 +216,60 @@ export class BrowserController extends EventEmitter {
     );
     webContents.on("did-finish-load", () => {
       this.recoverPage();
+    });
+
+    // 接管 session 下载事件。Suno Studio 的"Get Stems"走的是普通 download，
+    // 默认会弹系统保存对话框。改写 setSavePath 直接写到 ~/Downloads。
+    // Browser.downloadWillBegin / Browser.downloadProgress 由 session 层的
+    // 'will-download' 事件触发（Electron 不直接转 CDP 事件）。
+    // 部分单元测试用裸 EventEmitter 模拟 webContents，没有 .session 接口，
+    // 这里做防御性检查。
+    if (webContents.session && typeof webContents.session.on === "function") {
+      webContents.session.on("will-download", (_event, item, _webContents) => {
+        this.handleWillDownload(item).catch(() => undefined);
+      });
+    }
+  }
+
+  async handleWillDownload(item) {
+    this.downloadCounter += 1;
+    const downloadId = `dl_${this.downloadCounter}_${randomUUID().slice(0, 8)}`;
+    const suggestedFilename = item.getFilename() || "";
+    const safeName = sanitizeCaptureLabel(suggestedFilename).slice(0, 128) ||
+      `download-${Date.now()}`;
+    const savePath = path.join(this.downloadsDir, safeName);
+    item.setSavePath(savePath);
+    const record = {
+      downloadId,
+      filename: safeName,
+      savePath,
+      url: this.webContents.getURL(),
+      state: "in_progress",
+      receivedBytes: 0,
+      totalBytes: -1,
+      startedAt: Date.now(),
+      finishedAt: null,
+      error: null,
+    };
+    this.downloads.set(downloadId, record);
+    item.on("updated", (_event, state) => {
+      const current = this.downloads.get(downloadId);
+      if (!current) return;
+      current.state = state;
+      current.receivedBytes = item.getReceivedBytes();
+      current.totalBytes = item.getTotalBytes();
+    });
+    const finalize = (state, error = null) => {
+      const current = this.downloads.get(downloadId);
+      if (!current || current.finishedAt) return;
+      current.state = state;
+      current.receivedBytes = item.getReceivedBytes();
+      current.totalBytes = item.getTotalBytes();
+      current.finishedAt = Date.now();
+      current.error = error;
+    };
+    item.once("done", (_event, state) => {
+      finalize(state === "completed" ? "completed" : "failed", state);
     });
   }
 
@@ -408,13 +496,16 @@ export class BrowserController extends EventEmitter {
     return { ok: true };
   }
 
-  async scroll({ direction, amount }) {
+  async scroll({ direction, amount, anchor }) {
     this.assertPageAvailable();
     const maxSteps = amount === "bottom" ? 12 : 1;
+    const anchorPoint = parseAnchor(anchor); // throws on CSS/XPath, returns null otherwise
     let steps = 0;
     let totalDeltaY = 0;
     let reachedEnd = false;
     let documentScrollRangeObserved = false;
+    let innerLastScrollY = null;
+    const isInner = Boolean(anchorPoint);
     for (let index = 0; index < maxSteps; index += 1) {
       const metrics = await this.cdp.send("Page.getLayoutMetrics");
       const viewport = metrics.cssLayoutViewport || metrics.layoutViewport || {};
@@ -433,6 +524,7 @@ export class BrowserController extends EventEmitter {
       documentScrollRangeObserved ||= documentScrollable;
       if (
         direction === "down" &&
+        !isInner &&
         documentState.reachedEnd
       ) {
         reachedEnd = true;
@@ -443,10 +535,16 @@ export class BrowserController extends EventEmitter {
         amount: amount === "bottom" ? "page" : amount,
         viewportHeight: height,
       });
+      const anchorX = anchorPoint
+        ? Math.round(width * anchorPoint.x)
+        : Math.round(width * 0.9);
+      const anchorY = anchorPoint
+        ? Math.round(height * anchorPoint.y)
+        : Math.round(height / 2);
       await this.cdp.send("Input.dispatchMouseEvent", {
         type: "mouseWheel",
-        x: Math.round(width * 0.9),
-        y: Math.round(height / 2),
+        x: anchorX,
+        y: anchorY,
         deltaX: 0,
         deltaY,
       });
@@ -457,10 +555,27 @@ export class BrowserController extends EventEmitter {
           ? 420 + Math.floor(Math.random() * 260)
           : 180,
       );
+
+      // 内层容器模式：用 layout metrics 滚动后的 pageY 对比判断是否到底。
+      // 文档几何无法证明内层容器边界；连续两次无位移即认为到顶/到底。
+      if (isInner) {
+        const postMetrics = await this.cdp.send("Page.getLayoutMetrics");
+        const postVisual = postMetrics.cssVisualViewport || postMetrics.visualViewport || {};
+        const postPageY = Math.max(
+          0,
+          Number(postVisual.pageY) || 0,
+        );
+        if (innerLastScrollY !== null && postPageY === innerLastScrollY) {
+          reachedEnd = true;
+          break;
+        }
+        innerLastScrollY = postPageY;
+      }
     }
     if (
       amount === "bottom" &&
       !reachedEnd &&
+      !isInner &&
       documentScrollRangeObserved
     ) {
       const metrics = await this.cdp.send("Page.getLayoutMetrics");
@@ -484,6 +599,9 @@ export class BrowserController extends EventEmitter {
       steps,
       reachedEnd,
       deltaY: totalDeltaY,
+      anchor: anchorPoint
+        ? { kind: "coords", x: anchorPoint.x, y: anchorPoint.y }
+        : null,
     };
   }
 
@@ -682,6 +800,132 @@ export class BrowserController extends EventEmitter {
       mechanism,
       files: files.map((file) => path.basename(file)),
     };
+  }
+
+  async captureSeries({ label, anchor, maxShots = 12 } = {}) {
+    this.assertPageAvailable();
+    const shots = Math.max(1, Math.min(60, Math.round(Number(maxShots) || 12)));
+    const anchorPoint = parseAnchor(anchor); // throws on CSS/XPath
+    const capture = await this.captureStore.begin(label);
+    let stopReason = "max_shots";
+    let reachedEnd = false;
+    try {
+      for (let index = 0; index < shots; index += 1) {
+        const metrics = await this.cdp.send("Page.getLayoutMetrics");
+        const viewport =
+          metrics.cssLayoutViewport || metrics.layoutViewport || {};
+        const visual = metrics.cssVisualViewport || metrics.visualViewport || {};
+        const width = Math.max(1, Number(viewport.clientWidth) || 1);
+        const height = Math.max(1, Number(viewport.clientHeight) || 1);
+        const pageY = Math.max(
+          0,
+          Number(visual.pageY) || Number(viewport.pageY) || 0,
+        );
+
+        const { data } = await this.cdp.send("Page.captureScreenshot", {
+          format: "png",
+          captureBeyondViewport: false,
+        });
+        await this.captureStore.writeShot(capture, {
+          dataBase64: data,
+          pageY,
+          viewportHeight: height,
+          url: this.webContents.getURL(),
+        });
+
+        // 最后一屏不再滚
+        if (index === shots - 1) {
+          stopReason = "max_shots";
+          break;
+        }
+
+        // 内层滚动：滚 wheel；非内层滚动：让 scroll() 内部跑完一次 page 滚动
+        if (anchorPoint) {
+          const deltaY = boundedScrollDelta({
+            direction: "down",
+            amount: "page",
+            viewportHeight: height,
+          });
+          await this.cdp.send("Input.dispatchMouseEvent", {
+            type: "mouseWheel",
+            x: Math.round(width * anchorPoint.x),
+            y: Math.round(height * anchorPoint.y),
+            deltaX: 0,
+            deltaY,
+          });
+          await delay(420 + Math.floor(Math.random() * 260));
+          const post = await this.cdp.send("Page.getLayoutMetrics");
+          const postVisual =
+            post.cssVisualViewport || post.visualViewport || {};
+          const postY = Math.max(
+            0,
+            Number(postVisual.pageY) || 0,
+          );
+          if (postY === pageY) {
+            stopReason = "no_scroll_progress";
+            reachedEnd = true;
+            break;
+          }
+        } else {
+          const scrollResult = await this.scroll({
+            direction: "down",
+            amount: "page",
+          });
+          if (scrollResult.reachedEnd) {
+            stopReason = "reached_end";
+            reachedEnd = true;
+            break;
+          }
+          if (scrollResult.steps === 0) {
+            stopReason = "no_scroll_progress";
+            reachedEnd = true;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      stopReason = `error:${error.code || "unknown"}`;
+      // 仍然写出 manifest，但带 stopReason 标记
+      const manifest = await this.captureStore.finish(capture, {
+        reachedEnd,
+        stopReason,
+      });
+      this.invalidate();
+      throw Object.assign(error, { manifest });
+    }
+
+    const manifest = await this.captureStore.finish(capture, {
+      reachedEnd,
+      stopReason,
+    });
+    this.invalidate();
+    return {
+      captureId: manifest.captureId,
+      label: manifest.label,
+      dirName: manifest.dirName,
+      shotCount: manifest.shotCount,
+      reachedEnd: manifest.reachedEnd,
+      stopReason: manifest.stopReason,
+      shots: manifest.shots,
+    };
+  }
+
+  downloadStatus({ downloadId, includeCompleted = false } = {}) {
+    if (downloadId) {
+      const record = this.downloads.get(downloadId);
+      if (!record) {
+        const error = new Error(`Unknown downloadId: ${downloadId}`);
+        error.code = "unknown_download";
+        throw error;
+      }
+      return record;
+    }
+    const all = [];
+    for (const record of this.downloads.values()) {
+      if (!includeCompleted && record.finishedAt) continue;
+      all.push(record);
+    }
+    return { downloads: all, count: all.length };
   }
 
   close() {

@@ -120,6 +120,20 @@ export async function loadConfig(configPath = defaultConfigPath()) {
     }
     config.version = CONFIG_VERSION;
   }
+  // 老 v2 配置（beta.13 及更早）没有 capture / download 两个 capability；
+  // 升级时给所有非 finalize 受限的 principal 补齐。
+  for (const agent of config.agents || []) {
+    if (!Array.isArray(agent.capabilities)) continue;
+    for (const capability of [
+      CAPABILITIES.CAPTURE_SERIES,
+      CAPABILITIES.DOWNLOAD_STATUS,
+    ]) {
+      if (!agent.capabilities.includes(capability)) {
+        agent.capabilities.push(capability);
+        upgradedCapabilities = true;
+      }
+    }
+  }
   const beforeTargets = JSON.stringify(config.security?.contributionTargets || []);
   if (config.security?.contributionTargets) {
     config.security.contributionTargets = hardenLegacyContributionTargets(

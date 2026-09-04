@@ -76,10 +76,20 @@ test("blocks originality declarations for human confirmation", () => {
 test("blocks Suno credit actions", () => {
   const risk = classifyAction({
     action: "click",
-    node: { tag: "button", role: "button", name: "Get Stems / MIDI Pro" },
+    node: { tag: "button", role: "button", name: "Create Song" },
   });
   assert.equal(risk.blocked, true);
   assert.equal(risk.code, "credit_action_requires_handoff");
+});
+
+test("Get Stems/MIDI is delegated via finalize gate, not credit handoff", () => {
+  const risk = classifyAction({
+    action: "click",
+    node: { tag: "button", role: "button", name: "Get Stems / MIDI Pro" },
+  });
+  assert.equal(risk.blocked, true);
+  assert.equal(risk.code, "stem_download_requires_finalize");
+  assert.equal(risk.delegableCapability, "browser.finalize.ref");
 });
 
 test("allows navigation links named Create", () => {

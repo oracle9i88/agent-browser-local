@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.0-beta.13 — 2026-09-04
+
+- 新增 `browser.captureSeries`：Kimi 调一次即循环截图 + 落盘 + 滚动 + 到底判断；按歌建文件夹（`~/.agent-browser-local/captures/<label>-<时间戳>/shot-NN.png` + manifest.json）；scroll 加 `anchor: { kind: "coords", x, y }` 把滚轮打到内层容器，连续两次无位移即认为到底。CSS / XPath 锚点一律拒绝（安全门）。
+- 新增 `browser.downloadStatus` 与 `session.on('will-download')` 接管：Suno Studio Get Stems/MIDI 直接落到 `~/Downloads/<safe-name>`，系统保存对话框不再弹出。
+- `risk-policy`：Suno Studio 的 `Get Stems/MIDI` 从 credit handoff 降为 finalize 权限门（`browser.finalize.ref`）。Create Song / Remaster / Add Vocal 仍走 credit handoff，不下放。
+- 旧 v2 配置自动给所有 principal 补齐 `browser.capture.series` 和 `browser.download.status` 两个新 capability（沿用 SCROLL 升级模式）。
+
 ## v0.3.0-beta.4 — 2026-08-17
 
 - 明确禁止 Agent 自动勾选“我不是机器人”、CAPTCHA 或任何人机验证控件；检测到后只暂停并 handoff 给用户。

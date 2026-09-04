@@ -209,16 +209,68 @@ export class BrowserDaemon {
           );
         }
         return this.executor.run(async () => {
-          const result = await this.controller.scroll({ direction, amount });
+          const result = await this.controller.scroll({
+            direction,
+            amount,
+            anchor: params.anchor,
+          });
           await this.audit.record({
             event: "browser.scroll",
             principal: identity.principal,
             direction,
             amount,
+            anchor: result.anchor,
             url: safeUrl(this.controller.status().url),
           });
           return result;
         });
+      }
+
+      case "browser.captureSeries": {
+        this.requireCapability(identity, CAPABILITIES.CAPTURE_SERIES);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        const label =
+          typeof params.label === "string" ? params.label.slice(0, 200) : "";
+        const maxShots = Number(params.maxShots);
+        const anchor =
+          params.anchor && typeof params.anchor === "object"
+            ? params.anchor
+            : null;
+        return this.executor.run(async () => {
+          const result = await this.controller.captureSeries({
+            label,
+            anchor,
+            maxShots: Number.isFinite(maxShots) ? maxShots : undefined,
+          });
+          await this.audit.record({
+            event: "browser.captureSeries",
+            principal: identity.principal,
+            captureId: result.captureId,
+            label: result.label,
+            dirName: result.dirName,
+            shotCount: result.shotCount,
+            reachedEnd: result.reachedEnd,
+            stopReason: result.stopReason,
+            url: safeUrl(this.controller.status().url),
+          });
+          return result;
+        });
+      }
+
+      case "browser.downloadStatus": {
+        this.requireCapability(identity, CAPABILITIES.DOWNLOAD_STATUS);
+        const result = this.controller.downloadStatus({
+          downloadId:
+            typeof params.downloadId === "string" ? params.downloadId : null,
+          includeCompleted: Boolean(params.includeCompleted),
+        });
+        await this.audit.record({
+          event: "browser.downloadStatus",
+          principal: identity.principal,
+          url: safeUrl(this.controller.status().url),
+        });
+        return result;
       }
 
       case "browser.click": {

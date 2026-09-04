@@ -1,6 +1,6 @@
 {
   "name": "agent-browser-local",
-  "version": "0.3.0-beta.12",
+  "version": "0.3.0-beta.13",
   "description": "Contribution-only local Chromium browser for Codex, Claude, NovaGe and NovaDe",
   "private": true,
   "repository": {
