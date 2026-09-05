@@ -74,13 +74,14 @@ test("blocks originality declarations for human confirmation", () => {
   assert.equal(risk.code, "legal_consent_required");
 });
 
-test("blocks Suno credit actions", () => {
+test("Suno generation actions are delegable via the credits capability", () => {
   const risk = classifyAction({
     action: "click",
     node: { tag: "button", role: "button", name: "Create Song" },
   });
   assert.equal(risk.blocked, true);
   assert.equal(risk.code, "credit_action_requires_handoff");
+  assert.equal(risk.delegableCapability, CAPABILITIES.CREDITS_SUNO);
 });
 
 test("Get Stems/MIDI remains a credit handoff", () => {
@@ -115,7 +116,7 @@ test("Studio clip WAV download requires a real-user handoff", () => {
   assert.equal(result.delegableCapability, undefined);
 });
 
-test("Open in Studio multi-track creation remains a credit handoff", () => {
+test("Open in Studio multi-track creation is delegable via the credits capability", () => {
   const result = classifyAction({
     action: "click",
     node: {
@@ -126,7 +127,7 @@ test("Open in Studio multi-track creation remains a credit handoff", () => {
   });
   assert.equal(result.blocked, true);
   assert.equal(result.code, "credit_action_requires_handoff");
-  assert.equal(result.delegableCapability, undefined);
+  assert.equal(result.delegableCapability, CAPABILITIES.CREDITS_SUNO);
 });
 
 test("song-page formats never receive a Studio download permit", () => {

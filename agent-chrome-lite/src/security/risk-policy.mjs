@@ -8,8 +8,12 @@ const destructiveOrPaymentWords = [
   /删除|移至垃圾箱|付款|支付|购买|下单|确认订单/i,
 ];
 
-const creditWords = [
-  /\b\d+\s*credits?\b/i,
+// 明确标注价格（"50 credits"）的入口与生成类动作一样，可委托给本地权限表
+// 授予 browser.credits.suno 的 principal；未授权时仍然只能用户本人确认。
+const creditQuotedWords = [/\b\d+\s*credits?\b/i];
+
+// 生成类动作可委托给本地权限表授予 browser.credits.suno 的 principal。
+const creditActionWords = [
   /create\s+song/i,
   /remaster/i,
   /add\s+(?:instrumental|vocal)/i,
@@ -209,11 +213,22 @@ export function classifyAction({ action, node, url }) {
       delegableCapability: "browser.finalize.ref",
     };
   }
-  if (matchesAny(text, creditWords)) {
+  if (matchesAny(text, creditQuotedWords)) {
     return {
       blocked: true,
       code: "credit_action_requires_handoff",
-      reason: "该动作可能生成内容或消耗 credits，P0 只允许拦截并交给用户。",
+      reason:
+        "该动作明确标注消耗 credits，需要本地权限表明确授予 browser.credits.suno 的 Agent 执行，或由用户本人完成。",
+      delegableCapability: "browser.credits.suno",
+    };
+  }
+  if (matchesAny(text, creditActionWords)) {
+    return {
+      blocked: true,
+      code: "credit_action_requires_handoff",
+      reason:
+        "该动作可能生成内容或消耗 credits，需要本地权限表明确授予 browser.credits.suno 的 Agent 执行，或由用户本人完成。",
+      delegableCapability: "browser.credits.suno",
     };
   }
 

@@ -14,16 +14,19 @@ export const CAPABILITIES = Object.freeze({
   FILL: "browser.fill.ref",
   UPLOAD: "browser.upload.ref",
   FINALIZE: "browser.finalize.ref",
+  CREDITS_SUNO: "browser.credits.suno",
   HANDOFF: "browser.handoff",
 });
 
-// Finalize is deliberately opt-in per locally configured principal. It is not
-// part of the capabilities created for a fresh installation.
+// Finalize and Suno credits are deliberately opt-in per locally configured
+// principal. They are not part of the capabilities created for a fresh
+// installation.
 export const DEFAULT_CAPABILITIES = Object.freeze(
   Object.values(CAPABILITIES).filter(
     (capability) =>
       ![
         CAPABILITIES.FINALIZE,
+        CAPABILITIES.CREDITS_SUNO,
         CAPABILITIES.CAPTURE_SERIES,
         CAPABILITIES.DOWNLOAD_STATUS,
       ].includes(capability),

@@ -163,6 +163,22 @@ osascript -e 'tell application "Agent Browser Local" to activate' \
 
 已知坑：全静音歌曲的 M4A 是 27KB 空壳；Suno 的 M4A 实为 opus 封装，afinfo/afconvert 读不了，须用 ffprobe/ffmpeg 验证。
 
+## Suno 多轨 Studio 下载流程（agent 验收，2026-09-06）
+
+整首歌进 Studio 分轨再整包下载，**不消耗每月 66 首额度**（实测 10 首连下后额度不变）。每首流程：
+
+1. 歌曲页 → 歌曲本体 ⋯ 菜单 → 视觉点击 `Edit ▸` **两次**（第一次高亮、第二次才展开子菜单）→ `Open in Studio`（子菜单倒数第二项）。
+2. 弹窗选 `Single-track`（整混，免费）或 `Multi-track`（分轨，50 credits；标注价格，需 `browser.credits.suno` 能力方可委托）。分轨需 1–6 分钟，期间可能弹 Cloudflare 人机验证——**不用管，5–6 分钟自行消失**，分轨继续。人机验证本身永远不许 Agent 代勾。
+3. 多轨工程打开后先 `browser.captureSeries` 截屏（锚点取左侧轨道面板 (140,200)），`reachedEnd=true` 才算截全。
+4. `Export menu → Multitrack`（finalize 可委托，一次性许可自动落盘 ZIP 到 ~/Downloads）。**首次导出常 0 字节 interrupted**（服务器还在打包），重试一次即正常传输；大 ZIP 300–600MB。
+5. 验收：`unzip -t` 完整性 + 主轨 WAV 用 `unzip -p … | ffmpeg -i pipe:0 -af volumedetect` 看电平（float32 WAV，Python wave 库读不了）。
+
+已知坑：
+- 从 /studio 导航回 /create 或 /me 经常"假成功"（URL 不变），需再导一次；列表行要等 5–10 秒才进 a11y 树。
+- 长时间连续操作后页面可能 CDP 超时冻结（今晚三次），重启应用即恢复，Profile 和 Studio 工程都不丢（工程在服务端，重开 /studio 自动回到最近工程）。
+- Create 表单：生成后 Styles 自动清空、Exclude styles 和标题保留；换提示词必须先 `Clear all form inputs`（有 Confirm 确认框）再填，否则标题会追加串联。视觉填写（fillVisual）60 秒截图过期，截图和填写要连着做。
+- 多轨 ZIP 命名冲突时自动加 (2)/(3) 后缀；监视脚本误判会重复下载同歌，完成后人工核对去重。
+
 ## 迁移到新机器
 
 1. `git clone` 本仓库 → `npm ci` → `npm start`（或 `npm run package:mac` 后双击 dist 里的 .app）。

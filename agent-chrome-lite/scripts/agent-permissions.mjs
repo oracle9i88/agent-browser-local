@@ -14,11 +14,17 @@ function usage() {
     "  npm run agent-permissions -- --revoke-finalize <principal>",
     "  npm run agent-permissions -- --grant-suno-studio <principal>",
     "  npm run agent-permissions -- --revoke-suno-studio <principal>",
+    "  npm run agent-permissions -- --grant-suno-credits <principal>",
+    "  npm run agent-permissions -- --revoke-suno-credits <principal>",
   ].join("\n");
 }
 
 export function updateFinalizeCapability(config, principal, enabled) {
   return updateCapabilities(config, principal, [CAPABILITIES.FINALIZE], enabled);
+}
+
+export function updateSunoCreditsCapability(config, principal, enabled) {
+  return updateCapabilities(config, principal, [CAPABILITIES.CREDITS_SUNO], enabled);
 }
 
 export function updateSunoStudioCapabilities(config, principal, enabled) {
@@ -59,9 +65,11 @@ async function main() {
       const sunoStudio =
         agent.capabilities?.includes(CAPABILITIES.CAPTURE_SERIES) &&
         agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
+      const sunoCredits = agent.capabilities?.includes(CAPABILITIES.CREDITS_SUNO);
       process.stdout.write(
         `${agent.principal}\tfinalize=${finalize ? "on" : "off"}` +
-        `\tsuno-studio=${sunoStudio ? "on" : "off"}\n`,
+        `\tsuno-studio=${sunoStudio ? "on" : "off"}` +
+        `\tsuno-credits=${sunoCredits ? "on" : "off"}\n`,
       );
     }
     return;
@@ -72,6 +80,8 @@ async function main() {
     ["--revoke-finalize", { kind: "finalize", enabled: false }],
     ["--grant-suno-studio", { kind: "suno-studio", enabled: true }],
     ["--revoke-suno-studio", { kind: "suno-studio", enabled: false }],
+    ["--grant-suno-credits", { kind: "suno-credits", enabled: true }],
+    ["--revoke-suno-credits", { kind: "suno-credits", enabled: false }],
   ]);
   const action = actions.get(command);
   if (!action || !principal) {
@@ -80,6 +90,8 @@ async function main() {
 
   if (action.kind === "finalize") {
     updateFinalizeCapability(config, principal, action.enabled);
+  } else if (action.kind === "suno-credits") {
+    updateSunoCreditsCapability(config, principal, action.enabled);
   } else {
     updateSunoStudioCapabilities(config, principal, action.enabled);
   }
