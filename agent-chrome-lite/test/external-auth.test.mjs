@@ -5,6 +5,8 @@ import {
   classifyExternalAuthUrl,
   isExternalAuthUrl,
 } from "../src/browser/external-auth.mjs";
+import { normalizeEndpoint } from "../src/browser/chrome-cdp.mjs";
+import { openChromeSessionBridge } from "../src/browser/chrome-launcher.mjs";
 
 test("classifies Google OAuth URLs for external Chrome handoff", () => {
   const result = classifyExternalAuthUrl(
@@ -35,3 +37,20 @@ test("never opens arbitrary or unsafe URLs externally", () => {
   }
 });
 
+test("Chrome session bridge accepts only a loopback CDP endpoint", () => {
+  assert.equal(normalizeEndpoint("http://127.0.0.1:9222").port, "9222");
+  assert.throws(
+    () => normalizeEndpoint("https://example.com:9222"),
+    /loopback HTTP/,
+  );
+});
+
+test("Chrome session bridge refuses non-Suno URLs before launching", async () => {
+  await assert.rejects(
+    openChromeSessionBridge({
+      url: "https://example.com/",
+      profileDir: "/tmp/agent-browser-bridge-test",
+    }),
+    /only opens an HTTPS Suno URL/,
+  );
+});

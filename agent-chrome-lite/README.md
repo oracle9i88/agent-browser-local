@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.12`（Public Preview）。
+当前版本：`v0.3.0-beta.14`（Public Preview）。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -20,17 +20,20 @@
 - `ref` 在每次动作、刷新或导航后失效。
 - 无名控件允许“当前截图动态定位”；截图 ID 60 秒过期，页面变化立即失效，禁止固定坐标。
 - 投稿页提供受权限控制的 `browser.scroll`：支持有限的人类步长，也支持最多 12 步、逐步节流的 `bottom`；只读取视口几何，不读取或导出页面正文，方向/步幅进入审计。普通文档能可靠回报 `reachedEnd`；SPA 内层滚动容器无法从文档几何证明到底时会返回 `false`，由下一张截图复核，禁止假报成功。
+- `browser.captureSeries` 只在 Suno Studio 可用，并要求来自 60 秒内当前截图的视觉锚点；daemon 循环保存完整截图并滚动，以左侧轨道编号/名称栏的裁剪哈希判断进度，排除 Magic Bar 轮换提示等动画干扰。连续两次轨道栏不变才报告到底。截图写入 `~/.agent-browser-local/captures/<label>-<timestamp>/`，manifest 同时记录完整图片哈希、稳定判定哈希和不含查询串的页面地址。
+- Suno Studio 多轨本机导出使用一次性、15 秒短期许可：只有经 daemon 风险策略识别并审计的 `Export → Multitrack` 才能触发自动落盘；普通歌曲页 Download 不使用这条通道。片段 `Download .WAV` 及其系统保存流程由用户本人完成。`browser.downloadStatus` 返回 Agent 发起的多轨在飞/已完成记录。
 - 文件上传通过 Snapshot 找到原生文件输入；隐藏输入可从语义上传入口或 60 秒有效的当前截图动态按钮拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
-- 创建、发布、提交和协议确认默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create、Get Stems/MIDI 仍不可委托。
+- 创删、提交和发布默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create 仍不可委托。
+- Suno 的额度语义按入口严格区分：Premier 普通歌曲页下载每月 60 次；已进入 Studio 后的导出不限次数；歌曲页 `Open in Studio → Multi-track` 是创建多轨工程并显示 50 credits，`Get MIDI` 也可能消耗 credits。后二者仍在扣费前 handoff，不能因按钮含有 Multi-track/MIDI 就获得下载许可。
 - 人机验证、CAPTCHA、“我不是机器人”和类似安全检查永远由用户本人完成；Agent 只负责识别、暂停和提示，不会自动勾选或尝试绕过。
 - 单队列、人类节奏执行和 JSONL 审计。
 - MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
 - NovaGe/NovaDe 共用 `adapters/python/agent_browser_client.py`；principal 固定为本机 token 映射，服务地址只能是 loopback，上传文件只能来自各自 workspace。
 - macOS 单实例锁：重复双击只唤醒已运行窗口，不创建第二个 daemon 或第二套 Profile。
 - 启动失败会显示本地错误窗口；页面故障会在工具栏显示红色状态，同时明确保留登录资料。
-- Google/Suno 登录不会在 Electron 内嵌窗口里反复尝试：检测到认证弹窗或主框架认证跳转时，自动打开系统 Chrome，并冻结当前页面。完成登录后，需在 Chrome 保留 Suno 页面并点击“完成后同步认证”；桥只读取 Suno allowlist 会话 Cookie，刷新 Agent Browser 页面，最后由用户确认“我已接管”。同步需要 Chrome 远程调试端点（默认 `http://127.0.0.1:9222`，可用 `ABL_CHROME_CDP_URL` 覆盖），不会读取 Google Cookie，也不会复制整个 Chrome Profile。
+- Google/Suno 登录不会在 Electron 内嵌窗口里反复尝试：迁移向导可打开使用独立持久 Profile 的 Chrome 会话桥；用户只在该 Chrome 完成 Google 登录，随后逐域授权 `suno.com` 与 `auth.suno.com` 同步。桥只读取 Suno/Clerk 最小白名单 Cookie，Google Cookie、密码、整份 Chrome Profile 均不读取。同步后程序必须以页面出现 Profile menu/credits 且 Log in 消失作为真实验收；仅有“Cookie 已注入”不能判定登录成功。
 
 ## 明确不提供
 
@@ -56,6 +59,7 @@ npm start
 ```bash
 npm run package:mac
 npm run test:packaged
+npm run test:capture
 ```
 
 `package:mac` 使用项目现有 Electron 运行时离线生成 `.app`、版本化 ZIP 和 `release-manifest.json`，不下载新依赖；只打入运行所需的 `src/` 与 `ws`。应用有独立名称、Bundle ID 和图标，并删除 Electron 模板的摄像头、麦克风、蓝牙及任意网络加载权限声明。发布清单记录 ZIP 字节数和 SHA-256。
@@ -104,6 +108,20 @@ curl -X POST \
   -H 'content-type: application/json' \
   --data '{"direction":"down","amount":"bottom"}' \
   http://127.0.0.1:3767/v1/actions/scroll
+
+# 滚动截屏：按歌建文件夹，自动滚到底或 maxShots 为止
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"label":"Tragic Grandeur","anchor":{"kind":"visual","screenshotId":"CURRENT_SCREENSHOT_ID","x":230,"y":430},"maxShots":12}' \
+  http://127.0.0.1:3767/v1/actions/capture-series
+
+# 下载进度查询（Kimi 校验今天到底下到哪几轨）
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{}' \
+  http://127.0.0.1:3767/v1/actions/download-status
 ```
 
 WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: Bearer ...` 请求头里。消息格式：
@@ -111,6 +129,16 @@ WebSocket 地址为 `ws://127.0.0.1:3767/v1/ws`，认证放在 `Authorization: B
 ```json
 {"id":"1","method":"browser.snapshot","params":{}}
 ```
+
+## Suno Studio 工作流（agent 验收）
+
+Suno Studio 的滚动截屏和多轨下载不是普通页面交互；下面是 Agent 在 `https://suno.com/studio` 上执行滚动截屏和下载的受限流程。
+
+1. **登录与 dismiss**：首次进 Suno Studio 时右下角会浮出 "What's This?" 帮助层，必须先由用户本人点 Dismiss（Agent 不代勾也不会自动隐藏）。Dismiss 后浮层消失，左侧轨道面板才进入完整滚动模式。
+2. **滚动截屏**：先调用 `browser.screenshot`，再从这张截图选择左侧轨道面板内一点，把同一 `screenshotId` 和像素坐标作为 `kind: visual` 锚点传给 `browser.captureSeries`。视觉锚点 60 秒过期，页面变化即失效，禁止保存固定坐标复用。
+3. **进入多轨工程**：从歌曲页选择 `Edit → Open in Studio → Multi-track`；当选择项显示 stems 与 credits 时，daemon 必须在扣费前 handoff 给用户确认。进入 Studio 后才能做配器截图。
+4. **下载工程**：Studio 中的 `Export → Multitrack` 下载全部轨道，并被识别为 `studio_download_requires_finalize`；只有本地权限表授予 `browser.finalize.ref` 的 principal 能代点。要快速取单轨/片段，Agent 可用 `browser.click` / `browser.clickVisual` 的 `mouseButton: "right"` 打开片段菜单，但 `Download .WAV` 和随后出现的系统保存流程必须由用户本人完成。Agent 不把这条人工流程假报为自动下载。多轨自动下载落到 `~/Downloads/`，并由 `browser.downloadStatus` 监控。`Full Song` / `Selected Time Range` 只存回 Library，不算本机下载。
+5. **复核位置**：只有 `stopReason=visual_stable_after_two_scrolls` 才代表视觉证据支持已经到底；`max_shots` 代表未能证明到底，不得假报完成。
 
 ## MCP
 
@@ -155,12 +183,14 @@ npm run platforms -- --disable suno
 npm run agent-permissions -- --list
 npm run agent-permissions -- --grant-finalize codex
 npm run agent-permissions -- --revoke-finalize codex
+npm run agent-permissions -- --grant-suno-studio codex
+npm run agent-permissions -- --revoke-suno-studio codex
 ```
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.12`（验收通过后创建）
-- GitHub：`codex/scroll-beta12` 保存本版源码；tag 在打包和验收通过后固定审计提交。
+- Git tag：`v0.3.0-beta.14`（验收通过后创建）
+- GitHub：`codex/scroll-beta12` 保存候选源码；tag 在打包和验收通过后固定审计提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 

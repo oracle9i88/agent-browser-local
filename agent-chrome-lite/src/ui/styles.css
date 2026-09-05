@@ -200,6 +200,13 @@ button:disabled { color: #666d79; }
   font-size: 11px;
 }
 
+.migration-open-bridge {
+  margin-top: 8px;
+  border-color: #4a6082;
+  color: #cfe0ff;
+  background: #172236;
+}
+
 .migration-offer {
   margin-bottom: 8px;
   padding: 8px 10px;
@@ -218,9 +225,32 @@ button:disabled { color: #666d79; }
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 3px 12px 3px 0;
+  min-height: 34px;
+  margin: 4px 8px 4px 0;
+  padding: 4px 10px;
+  border: 1px solid #343b47;
+  border-radius: 9px;
   color: #b9c1cf;
+  background: #1b1f27;
   font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.migration-domain:hover { border-color: #577061; }
+
+.migration-domain:has(input:checked) {
+  border-color: #57b881;
+  color: #d9f8e7;
+  background: #173024;
+}
+
+.migration-domain input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #57b881;
+  cursor: pointer;
 }
 
 .migration-actions {

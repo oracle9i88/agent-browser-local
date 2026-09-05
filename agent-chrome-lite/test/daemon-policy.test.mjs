@@ -15,10 +15,14 @@ function fixture(node) {
       };
     },
     resolveRef: () => ({ backendNodeId: 1, node }),
-    resolveVisualPoint: async () => ({
-      point: { x: 900, y: 422 },
-      node,
-    }),
+    lastResolveVisualOptions: null,
+    resolveVisualPoint: async function (_params, options) {
+      this.lastResolveVisualOptions = options || null;
+      return {
+        point: { x: 900, y: 422 },
+        node,
+      };
+    },
     setHandoff(reason, detail) {
       this.handoff = { required: true, reason, detail };
       return this.handoff;
@@ -28,12 +32,15 @@ function fixture(node) {
       return null;
     },
     clickCount: 0,
-    clickRef: async function () {
+    lastClickOptions: null,
+    clickRef: async function (_ref, options) {
       this.clickCount += 1;
+      this.lastClickOptions = options;
       return { ok: true };
     },
-    clickVisual: async function () {
+    clickVisual: async function (_point, options) {
       this.clickCount += 1;
+      this.lastClickOptions = options;
       return { ok: true };
     },
     scrollCount: 0,
@@ -49,6 +56,7 @@ function fixture(node) {
       };
     },
     fillRef: async () => ({ ok: true }),
+    fillVisualPoint: async () => ({ ok: true }),
     snapshot: async () => ({
       snapshotId: "snapshot01",
       url: "https://example.test/create",
@@ -135,6 +143,46 @@ test("locally granted finalize capability also permits visual publishing", async
   assert.equal(events[0].event, "action.delegated");
   assert.equal(events[0].capability, CAPABILITIES.FINALIZE);
   assert.equal(events[1].event, "browser.clickVisual");
+});
+
+test("semantic and visual clicks forward an audited right mouse button", async () => {
+  const semantic = fixture({ tag: "span", role: "button", name: "Audio clip" });
+  await semantic.daemon.dispatch(semantic.identity, "browser.click", {
+    ref: "fresh:1",
+    mouseButton: "right",
+  });
+  assert.deepEqual(semantic.controller.lastClickOptions, { mouseButton: "right" });
+  assert.equal(semantic.events.at(-1).mouseButton, "right");
+
+  const visual = fixture({ tag: "div", role: "button", name: "Audio clip" });
+  visual.identity.capabilities.push(CAPABILITIES.CLICK_VISUAL);
+  await visual.daemon.dispatch(visual.identity, "browser.clickVisual", {
+    screenshotId: "fresh-visual-1",
+    x: 900,
+    y: 422,
+    mouseButton: "right",
+  });
+  assert.deepEqual(visual.controller.lastClickOptions, { mouseButton: "right" });
+  assert.equal(visual.controller.lastResolveVisualOptions, null);
+  assert.equal(visual.events.at(-1).mouseButton, "right");
+});
+
+test("only visual fill enables editable-descendant promotion", async () => {
+  const { controller, daemon, identity } = fixture({
+    tag: "textarea",
+    role: "textbox",
+    name: "Show Notes",
+  });
+  identity.capabilities.push(CAPABILITIES.CLICK_VISUAL, CAPABILITIES.FILL);
+  await daemon.dispatch(identity, "browser.fillVisual", {
+    screenshotId: "fresh-visual-1",
+    x: 900,
+    y: 422,
+    value: "paragraph",
+  });
+  assert.deepEqual(controller.lastResolveVisualOptions, {
+    promoteEditable: true,
+  });
 });
 
 test("finalize capability never authorizes deletion or payment", async () => {

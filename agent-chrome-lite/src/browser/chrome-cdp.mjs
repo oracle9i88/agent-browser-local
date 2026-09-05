@@ -1,8 +1,17 @@
 import WebSocket from "ws";
 
-function normalizeEndpoint(value) {
+export function normalizeEndpoint(value) {
   const raw = String(value || "http://127.0.0.1:9222").replace(/\/$/, "");
-  return new URL(raw);
+  const endpoint = new URL(raw);
+  if (
+    endpoint.protocol !== "http:" ||
+    !new Set(["127.0.0.1", "localhost", "[::1]"]).has(endpoint.hostname)
+  ) {
+    const error = new Error("Chrome CDP endpoint must be loopback HTTP");
+    error.code = "unsafe_chrome_cdp_endpoint";
+    throw error;
+  }
+  return endpoint;
 }
 
 async function readJson(url, { timeoutMs = 1500 } = {}) {
@@ -20,7 +29,16 @@ async function readJson(url, { timeoutMs = 1500 } = {}) {
 export async function listChromeTargets({ endpoint, timeoutMs = 1500 } = {}) {
   const base = normalizeEndpoint(endpoint);
   const url = new URL("/json/list", base);
-  const targets = await readJson(url, { timeoutMs });
+  let targets;
+  try {
+    targets = await readJson(url, { timeoutMs });
+  } catch {
+    const error = new Error(
+      "Chrome 会话桥未运行。请先在迁移向导中点‘打开 Suno Chrome 会话桥’，并在该 Chrome 窗口登录 Suno。",
+    );
+    error.code = "chrome_cdp_unavailable";
+    throw error;
+  }
   return Array.isArray(targets) ? targets : [];
 }
 

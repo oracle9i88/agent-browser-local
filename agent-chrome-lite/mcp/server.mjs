@@ -98,14 +98,17 @@ server.registerTool(
 server.registerTool(
   "browser_click",
   {
-    description: "Click a control by a fresh Snapshot ref. Irreversible, auth and credit actions are blocked by the daemon.",
-    inputSchema: { ref: z.string().min(1) },
+    description: "Left-click or right-click a control by a fresh Snapshot ref. Irreversible, auth and credit actions are blocked by the daemon.",
+    inputSchema: {
+      ref: z.string().min(1),
+      mouseButton: z.enum(["left", "right"]).default("left"),
+    },
   },
-  async ({ ref }) =>
+  async ({ ref, mouseButton }) =>
     textResult(
       await api("/v1/actions/click", {
         method: "POST",
-        body: JSON.stringify({ ref }),
+        body: JSON.stringify({ ref, mouseButton }),
       }),
     ),
 );
@@ -204,18 +207,19 @@ server.registerTool(
 server.registerTool(
   "browser_click_visual",
   {
-    description: "Click a point from the current screenshot only. Fixed or remembered coordinates are rejected as stale.",
+    description: "Left-click or right-click a point from the current screenshot only. Fixed or remembered coordinates are rejected as stale.",
     inputSchema: {
       screenshotId: z.string().uuid(),
       x: z.number().nonnegative(),
       y: z.number().nonnegative(),
+      mouseButton: z.enum(["left", "right"]).default("left"),
     },
   },
-  async ({ screenshotId, x, y }) =>
+  async ({ screenshotId, x, y, mouseButton }) =>
     textResult(
       await api("/v1/actions/visual-click", {
         method: "POST",
-        body: JSON.stringify({ screenshotId, x, y }),
+        body: JSON.stringify({ screenshotId, x, y, mouseButton }),
       }),
     ),
 );
@@ -231,6 +235,52 @@ server.registerTool(
       await api("/v1/handoff", {
         method: "POST",
         body: JSON.stringify({ reason }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "browser_capture_series",
+  {
+    description:
+      "Loop screenshot -> scroll (via coords anchor) -> repeat for one Suno Studio song, until the inner track panel stops moving or maxShots is hit. Per-song folder under ~/.agent-browser-local/captures/.",
+    inputSchema: {
+      label: z.string().max(200).default(""),
+      maxShots: z.number().int().min(1).max(60).default(12),
+      anchor: z
+        .object({
+          kind: z.literal("visual"),
+          screenshotId: z.string().uuid(),
+          x: z.number().min(0),
+          y: z.number().min(0),
+        })
+        .describe("A point selected from a current browser_screenshot result; expires after 60 seconds."),
+    },
+  },
+  async ({ label, maxShots, anchor }) =>
+    textResult(
+      await api("/v1/actions/capture-series", {
+        method: "POST",
+        body: JSON.stringify({ label, maxShots, anchor }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "browser_download_status",
+  {
+    description:
+      "List in-flight and completed Suno Studio stem downloads handled by the local will-download shim. Pass downloadId to fetch one record.",
+    inputSchema: {
+      downloadId: z.string().min(1).optional(),
+      includeCompleted: z.boolean().default(false),
+    },
+  },
+  async ({ downloadId, includeCompleted }) =>
+    textResult(
+      await api("/v1/actions/download-status", {
+        method: "POST",
+        body: JSON.stringify({ downloadId, includeCompleted }),
       }),
     ),
 );

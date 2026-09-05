@@ -22,7 +22,9 @@ function makeCookieStore() {
   return {
     jar,
     async set(cookie) {
-      jar.set(`${cookie.domain}|${cookie.path}|${cookie.name}`, { ...cookie });
+      const domain = cookie.domain || new URL(cookie.url).hostname;
+      const stored = { ...cookie, domain };
+      jar.set(`${domain}|${cookie.path}|${cookie.name}`, stored);
     },
     async get(filter) {
       return [...jar.values()].filter(
@@ -215,6 +217,85 @@ test("post-sync verification failure triggers automatic rollback (constraint 8)"
   assert.equal(raw.entries[0].status, "rolled_back");
 });
 
+test("Suno migration deterministically prefers the host-only session cookie", async () => {
+  const { store } = await makeManifestStore();
+  const cookieStore = makeCookieStore();
+  const cdp = {
+    listTargets: async () => [{ url: "https://suno.com/create", title: "Suno" }],
+    getCookiesForUrls: async () => [
+      {
+        name: "__session",
+        value: `${SECRET}-host-only`,
+        domain: "suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__session",
+        value: `${SECRET}-domain`,
+        domain: ".suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__session_Jnxw-muT",
+        value: `${SECRET}-suffix`,
+        domain: "suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "clerk_active_context",
+        value: `${SECRET}-context`,
+        domain: "suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "suno_session_recoverable",
+        value: `${SECRET}-recoverable`,
+        domain: "suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+      {
+        name: "__client",
+        value: `${SECRET}-client`,
+        domain: "auth.suno.com",
+        path: "/",
+        secure: true,
+        sameSite: "Lax",
+      },
+    ],
+  };
+
+  const result = await runLoginMigration({
+    selectedDomains: ["suno.com", "auth.suno.com"],
+    cookieStore,
+    manifestStore: store,
+    cdp,
+  });
+
+  assert.equal(result.platforms[0].injectedCount, 5);
+  assert.deepEqual(
+    [...cookieStore.jar.values()]
+      .map((cookie) => `${cookie.name}@${cookie.domain}`)
+      .sort(),
+    [
+      "__client@auth.suno.com",
+      "__session@suno.com",
+      "__session_Jnxw-muT@suno.com",
+      "clerk_active_context@suno.com",
+      "suno_session_recoverable@suno.com",
+    ],
+  );
+});
+
 test("mid-injection failure rolls back earlier cookies of the same platform", async () => {
   const { store, dir } = await makeManifestStore();
   const cookieStore = makeCookieStore();
@@ -235,7 +316,7 @@ test("mid-injection failure rolls back earlier cookies of the same platform", as
         selectedDomains: ["suno.com"],
         cookieStore: flakyStore,
         manifestStore: store,
-        cdp: cdpFor(offer),
+        cdp: cdpFor(offer, ["__session_Jnxw-muT"]),
       }),
     /同步/,
   );
@@ -411,7 +492,7 @@ test("existing cookie conflicts abort the migration without overwriting (round-3
   // pre-existing login state that must never be overwritten
   await cookieStore.set({
     url: "https://suno.com/",
-    name: "__client",
+    name: "__session",
     value: "OLD-PRE-EXISTING",
     domain: ".suno.com",
     path: "/",
@@ -432,7 +513,7 @@ test("existing cookie conflicts abort the migration without overwriting (round-3
   );
 
   const survivor = [...cookieStore.jar.values()].find(
-    (cookie) => cookie.name === "__client",
+    (cookie) => cookie.name === "__session",
   );
   assert.ok(survivor, "pre-existing cookie must survive");
   assert.equal(survivor.value, "OLD-PRE-EXISTING", "old value must be intact");

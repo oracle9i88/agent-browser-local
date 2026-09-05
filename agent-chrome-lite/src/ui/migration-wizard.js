@@ -73,6 +73,24 @@
     } catch (error) {
       section.append(el("div", "migration-warning", String(error?.message || error)));
     }
+    const openBridge = button("migration-open-bridge", "打开 Suno Chrome 会话桥");
+    openBridge.addEventListener("click", async () => {
+      openBridge.disabled = true;
+      setStatus(status, "正在打开独立的 Chrome 会话桥…", "info");
+      try {
+        await bridge.migrationOpenBridge();
+        setStatus(
+          status,
+          "会话桥已打开。首次请在该 Chrome 窗口登录 Suno；以后会保留登录态。登录后回到这里开始同步。",
+          "ok",
+        );
+      } catch (error) {
+        setStatus(status, String(error?.message || error), "error");
+      } finally {
+        openBridge.disabled = false;
+      }
+    });
+    section.append(openBridge);
     container.append(section);
   }
 
@@ -124,7 +142,10 @@
 
   function syncStartButton() {
     const start = panel?.querySelector("#migration-start");
-    if (start) start.disabled = selectedDomains().length === 0;
+    if (!start) return;
+    const hasSelection = selectedDomains().length > 0;
+    start.disabled = !hasSelection;
+    start.textContent = hasSelection ? "开始同步" : "先勾选域名";
   }
 
   async function startSync(statusNode, resultsContainer) {
@@ -160,14 +181,16 @@
   async function buildPanel() {
     panel = el("div", "migration-panel");
     panel.id = "migration-panel";
-    panel.hidden = true;
+    panel.hidden = false;
 
     const header = el("div", "migration-header");
     header.append(el("div", "migration-title", "迁移登录态（Chrome → Agent）"));
     const close = button("migration-close", "×");
+    close.id = "migration-close";
     close.setAttribute("aria-label", "关闭迁移向导");
-    close.addEventListener("click", () => {
+    close.addEventListener("click", async () => {
       panel.hidden = true;
+      await bridge.migrationSetOpen(false);
     });
     header.append(close);
     panel.append(header);
@@ -193,16 +216,20 @@
     panel.append(statusEl());
     panel.append(resultsContainerEl());
 
-    panel.insertBefore(profilesContainer, offersContainer);
-    renderProfiles(profilesContainer);
-    await renderOfferList(offersContainer);
-
+    // Paint the shell before Chrome/profile discovery. Those IPC calls can
+    // take several seconds; delaying append made the first click look broken.
     document.body.append(panel);
+    setStatus(status, "正在读取 Chrome 配置和可迁移平台…", "info");
+
+    panel.insertBefore(profilesContainer, offersContainer);
+    await renderProfiles(profilesContainer);
+    await renderOfferList(offersContainer);
+    setStatus(status, "请先勾选要同步的平台域名。", "info");
   }
 
   function actionsEl() {
     const actions = el("div", "migration-actions");
-    const start = button("migration-start", "开始同步");
+    const start = button("migration-start", "先勾选域名");
     start.id = "migration-start";
     start.disabled = true;
     start.addEventListener("click", () => startSync(status, results));
@@ -238,9 +265,26 @@
   function buildToggleButton() {
     const toggle = button("migration-toggle", "迁移登录态");
     toggle.id = "migration-toggle";
-    toggle.addEventListener("click", () => {
-      if (!panel) buildPanel();
-      panel.hidden = !panel.hidden;
+    toggle.addEventListener("click", async () => {
+      if (panel) {
+        const opening = panel.hidden;
+        panel.hidden = !opening;
+        await bridge.migrationSetOpen(opening);
+        return;
+      }
+      toggle.disabled = true;
+      toggle.textContent = "正在打开…";
+      try {
+        await bridge.migrationSetOpen(true);
+        await buildPanel();
+      } catch (error) {
+        if (panel && status) {
+          setStatus(status, `迁移向导加载失败：${String(error?.message || error)}`, "error");
+        }
+      } finally {
+        toggle.disabled = false;
+        toggle.textContent = "迁移登录态";
+      }
     });
     const toolbar = document.querySelector(".toolbar");
     const handoff = document.getElementById("handoff");

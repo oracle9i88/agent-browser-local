@@ -7,12 +7,23 @@ test("only allowlisted Suno auth cookies cross the browser boundary", () => {
   const selected = selectSunoAuthCookies([
     { domain: ".suno.com", name: "__client", value: "secret", path: "/", secure: true, httpOnly: true },
     { domain: "auth.suno.com", name: "__session", value: "session", path: "/", secure: true },
+    { domain: "suno.com", name: "__session_Jnxw-muT", value: "scoped", path: "/", secure: true },
+    { domain: "suno.com", name: "clerk_active_context", value: "context", path: "/", secure: true },
+    { domain: "suno.com", name: "suno_session_recoverable", value: "yes", path: "/", secure: true },
     { domain: ".suno.com", name: "ajs_anonymous_id", value: "tracking", path: "/" },
     { domain: ".google.com", name: "SID", value: "google-secret", path: "/" },
   ]);
-  assert.deepEqual(selected.map((cookie) => cookie.name), ["__client", "__session"]);
+  assert.deepEqual(selected.map((cookie) => cookie.name), [
+    "__client",
+    "__session",
+    "__session_Jnxw-muT",
+    "clerk_active_context",
+    "suno_session_recoverable",
+  ]);
   assert.equal(selected[0].url, "https://suno.com/");
   assert.equal(selected[0].httpOnly, true);
+  assert.equal(selected[1].url, "https://auth.suno.com/");
+  assert.equal(selected[2].url, "https://suno.com/");
 });
 
 test("rejects empty or foreign cookie sets", () => {

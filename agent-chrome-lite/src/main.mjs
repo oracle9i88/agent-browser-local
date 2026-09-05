@@ -10,7 +10,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { AuditLog } from "./audit.mjs";
-import { openInChrome } from "./browser/chrome-launcher.mjs";
+import {
+  openChromeSessionBridge,
+  openInChrome,
+} from "./browser/chrome-launcher.mjs";
 import { importSunoAuthCookies } from "./browser/auth-bridge.mjs";
 import { BrowserController } from "./browser/controller.mjs";
 import { readSunoCookiesFromChrome } from "./browser/chrome-cdp.mjs";
@@ -260,6 +263,32 @@ async function waitForToolbarChange(previousState) {
   );
 }
 
+async function verifyMigrationPanelOpensInSmoke() {
+  const panelOpened = await mainWindow.webContents.executeJavaScript(
+    `new Promise((resolve) => {
+      const toolbar = document.querySelector(".toolbar")?.getBoundingClientRect();
+      const toggle = document.querySelector("#migration-toggle");
+      const toggleRect = toggle?.getBoundingClientRect();
+      toggle?.click();
+      setTimeout(() => {
+        const panel = document.querySelector("#migration-panel");
+        resolve(Boolean(
+          toolbar && toggle && toggleRect && !toggle.disabled &&
+          toggleRect.width > 0 && toggleRect.height > 0 &&
+          toggleRect.left >= toolbar.left && toggleRect.right <= toolbar.right &&
+          panel && !panel.hidden
+        ));
+      }, 25);
+    })`,
+  );
+  const pageHidden = contentView.getVisible() === false;
+  await mainWindow.webContents.executeJavaScript(
+    `document.querySelector("#migration-close")?.click()`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  return panelOpened && pageHidden && contentView.getVisible() === true;
+}
+
 async function createWindow(config) {
   browsingSession.setUserAgent(
     browserUserAgent,
@@ -359,6 +388,12 @@ async function createWindow(config) {
   if (!expectedStateRendered) {
     throw new Error("安全工具栏初始化失败：启动状态未渲染");
   }
+  if (
+    process.env.ABL_SMOKE_HEADLESS === "1" &&
+    !(await verifyMigrationPanelOpensInSmoke())
+  ) {
+    throw new Error("安全工具栏初始化失败：迁移登录态按钮未能立即打开向导");
+  }
 
   if (process.env.ACL_DEVTOOLS === "1") {
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -396,6 +431,19 @@ function installIpc() {
   ipcMain.handle("migration:detect", () => detectChromeProfiles());
   ipcMain.handle("migration:offers", () => listMigrationOffers());
   ipcMain.handle("migration:spaces", () => spaceManager.listSpaces());
+  ipcMain.handle("migration:open-bridge", () =>
+    openChromeSessionBridge({
+      endpoint: process.env.ABL_CHROME_CDP_URL || "http://127.0.0.1:9222",
+      profileDir: path.join(runtimeDir, "chrome-session-bridge"),
+    }),
+  );
+  ipcMain.handle("migration:set-open", (_event, open) => {
+    // WebContentsView is composited above BrowserWindow HTML. Hide it while
+    // the trusted toolbar migration panel is open, otherwise the panel exists
+    // in the DOM but is visually covered by the page below y=64.
+    contentView?.setVisible(!Boolean(open));
+    return { open: Boolean(open) };
+  });
   ipcMain.handle("migration:run", (_event, selectedDomains) =>
     runLoginMigration({
       selectedDomains,

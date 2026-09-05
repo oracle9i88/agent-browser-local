@@ -102,6 +102,33 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
           deltaY: 1920,
         };
       }
+      if (method === "browser.captureSeries") {
+        return {
+          captureId: "offline-cap-1",
+          label: "Tragic Grandeur",
+          dirName: "Tragic Grandeur-20260904",
+          shotCount: 4,
+          reachedEnd: true,
+          stopReason: "reached_end",
+          shots: [],
+        };
+      }
+      if (method === "browser.downloadStatus") {
+        return {
+          downloads: [
+            {
+              downloadId: "dl_alpha",
+              filename: "stems.wav",
+              savePath: "/tmp/stems.wav",
+              state: "completed",
+              finishedAt: 1,
+              receivedBytes: 1024,
+              totalBytes: 1024,
+            },
+          ],
+          count: 1,
+        };
+      }
       throw new Error(`Unexpected offline method: ${method}`);
     },
   };
@@ -151,7 +178,7 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
     await client.connect(transport);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 12);
+    assert.equal(names.length, 14);
     assert.deepEqual(
       names.filter((name) =>
         /publish|submit|delete|pay|evaluate|script|selector/i.test(name),
@@ -175,6 +202,55 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
     });
     assert.match(mcpScroll.content[0].text, /"direction": "down"/);
     assert.match(mcpScroll.content[0].text, /"reachedEnd": true/);
+
+    const mcpCapture = await client.callTool({
+      name: "browser_capture_series",
+      arguments: {
+        label: "Tragic Grandeur",
+        maxShots: 4,
+        anchor: { kind: "visual", screenshotId: "00000000-0000-4000-8000-000000000001", x: 180, y: 500 },
+      },
+    });
+    assert.match(mcpCapture.content[0].text, /"dirName": "Tragic Grandeur-20260904"/);
+    assert.match(mcpCapture.content[0].text, /"stopReason": "reached_end"/);
+
+    const mcpDownloads = await client.callTool({
+      name: "browser_download_status",
+      arguments: { includeCompleted: true },
+    });
+    assert.match(mcpDownloads.content[0].text, /"downloadId": "dl_alpha"/);
+    assert.match(mcpDownloads.content[0].text, /"filename": "stems\.wav"/);
+
+    // HTTP 直连：captureSeries / downloadStatus 也必须经 daemon dispatch
+    const captureResponse = await fetch(
+      `http://127.0.0.1:${port}/v1/actions/capture-series`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ label: "Tragic Grandeur", maxShots: 4 }),
+      },
+    );
+    assert.equal(captureResponse.status, 200);
+    const captureJson = await captureResponse.json();
+    assert.equal(captureJson.result.captureId, "offline-cap-1");
+
+    const downloadResponse = await fetch(
+      `http://127.0.0.1:${port}/v1/actions/download-status`,
+      {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + token,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ includeCompleted: true }),
+      },
+    );
+    assert.equal(downloadResponse.status, 200);
+    const downloadJson = await downloadResponse.json();
+    assert.equal(downloadJson.result.count, 1);
   } finally {
     if (client) await client.close().catch(() => undefined);
     if (ws) {

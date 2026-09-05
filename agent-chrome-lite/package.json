@@ -1,6 +1,6 @@
 {
   "name": "agent-browser-local",
-  "version": "0.3.0-beta.12",
+  "version": "0.3.0-beta.14",
   "description": "Contribution-only local Chromium browser for Codex, Claude, NovaGe and NovaDe",
   "private": true,
   "repository": {
@@ -20,6 +20,7 @@
     "start:dev": "ACL_DEVTOOLS=1 electron .",
     "package:mac": "node ./scripts/package-macos.mjs",
     "test:packaged": "node ./scripts/packaged-smoke.mjs",
+    "test:capture": "node ./scripts/capture-s14-smoke.mjs",
     "doctor": "node ./scripts/doctor.mjs",
     "mcp": "node ./mcp/server.mjs",
     "init-config": "node ./scripts/init-config.mjs",

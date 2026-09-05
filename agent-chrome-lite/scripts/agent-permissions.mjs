@@ -12,10 +12,25 @@ function usage() {
     "  npm run agent-permissions -- --list",
     "  npm run agent-permissions -- --grant-finalize <principal>",
     "  npm run agent-permissions -- --revoke-finalize <principal>",
+    "  npm run agent-permissions -- --grant-suno-studio <principal>",
+    "  npm run agent-permissions -- --revoke-suno-studio <principal>",
   ].join("\n");
 }
 
 export function updateFinalizeCapability(config, principal, enabled) {
+  return updateCapabilities(config, principal, [CAPABILITIES.FINALIZE], enabled);
+}
+
+export function updateSunoStudioCapabilities(config, principal, enabled) {
+  return updateCapabilities(
+    config,
+    principal,
+    [CAPABILITIES.CAPTURE_SERIES, CAPABILITIES.DOWNLOAD_STATUS],
+    enabled,
+  );
+}
+
+function updateCapabilities(config, principal, capabilities, enabled) {
   const agent = config?.agents?.find((entry) => entry.principal === principal);
   if (!agent) throw new Error(`Unknown locally configured principal: ${principal}`);
   if (!Array.isArray(agent.capabilities)) {
@@ -23,8 +38,10 @@ export function updateFinalizeCapability(config, principal, enabled) {
   }
 
   const current = new Set(agent.capabilities);
-  if (enabled) current.add(CAPABILITIES.FINALIZE);
-  else current.delete(CAPABILITIES.FINALIZE);
+  for (const capability of capabilities) {
+    if (enabled) current.add(capability);
+    else current.delete(capability);
+  }
   agent.capabilities = [...current];
   return config;
 }
@@ -38,23 +55,40 @@ async function main() {
 
   if (command === "--list" && !principal) {
     for (const agent of config.agents || []) {
-      const enabled = agent.capabilities?.includes(CAPABILITIES.FINALIZE);
-      process.stdout.write(`${agent.principal}\tfinalize=${enabled ? "on" : "off"}\n`);
+      const finalize = agent.capabilities?.includes(CAPABILITIES.FINALIZE);
+      const sunoStudio =
+        agent.capabilities?.includes(CAPABILITIES.CAPTURE_SERIES) &&
+        agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
+      process.stdout.write(
+        `${agent.principal}\tfinalize=${finalize ? "on" : "off"}` +
+        `\tsuno-studio=${sunoStudio ? "on" : "off"}\n`,
+      );
     }
     return;
   }
 
-  const enabled = command === "--grant-finalize";
-  if ((!enabled && command !== "--revoke-finalize") || !principal) {
+  const actions = new Map([
+    ["--grant-finalize", { kind: "finalize", enabled: true }],
+    ["--revoke-finalize", { kind: "finalize", enabled: false }],
+    ["--grant-suno-studio", { kind: "suno-studio", enabled: true }],
+    ["--revoke-suno-studio", { kind: "suno-studio", enabled: false }],
+  ]);
+  const action = actions.get(command);
+  if (!action || !principal) {
     throw new Error(usage());
   }
 
-  updateFinalizeCapability(config, principal, enabled);
+  if (action.kind === "finalize") {
+    updateFinalizeCapability(config, principal, action.enabled);
+  } else {
+    updateSunoStudioCapabilities(config, principal, action.enabled);
+  }
   const tempPath = `${configPath}.${process.pid}.permissions.tmp`;
   await writeFile(tempPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   await rename(tempPath, configPath);
   process.stdout.write(
-    `${principal}\tfinalize=${enabled ? "on" : "off"}\nRestart Agent Browser Local to apply.\n`,
+    `${principal}\t${action.kind}=${action.enabled ? "on" : "off"}` +
+      "\nRestart Agent Browser Local to apply.\n",
   );
 }
 

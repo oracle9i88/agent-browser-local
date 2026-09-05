@@ -1,8 +1,13 @@
 const AUTH_COOKIE_NAMES = new Set([
-  "__client",
   "__session",
+  "__session_Jnxw-muT",
+  "__client",
+  "__client_Jnxw-muT",
+  "sessionid",
   "__client_uat",
-  "__clerk_db_jwt",
+  "__client_uat_Jnxw-muT",
+  "clerk_active_context",
+  "suno_session_recoverable",
 ]);
 
 const AUTH_DOMAINS = new Set(["suno.com", "auth.suno.com", "app.suno.ai"]);

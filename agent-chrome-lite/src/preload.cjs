@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("agentBrowser", {
   migrationDetect: () => ipcRenderer.invoke("migration:detect"),
   migrationOffers: () => ipcRenderer.invoke("migration:offers"),
   migrationSpaces: () => ipcRenderer.invoke("migration:spaces"),
+  migrationSetOpen: (open) => ipcRenderer.invoke("migration:set-open", Boolean(open)),
+  migrationOpenBridge: () => ipcRenderer.invoke("migration:open-bridge"),
   migrationRun: (domains) => ipcRenderer.invoke("migration:run", domains),
   migrationRollback: (migrationId) =>
     ipcRenderer.invoke("migration:rollback", migrationId),
