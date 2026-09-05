@@ -97,7 +97,7 @@ let exitCode = null;
 const childOutput = [];
 try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  if (manifest.version !== "0.3.0-beta.14") {
+  if (manifest.version !== "0.3.0-beta.15") {
     throw new Error(`Manifest version mismatch: ${manifest.version}`);
   }
   const archivePath = path.join(projectDir, "dist", manifest.archive);
@@ -194,7 +194,7 @@ try {
   const assert = (condition, message) => {
     if (!condition) throw new Error(`Assertion failed: ${message}`);
   };
-  assert(health.version === "0.3.0-beta.14", "packaged version");
+  assert(health.version === "0.3.0-beta.15", "packaged version");
   assert(session.result?.principal === "codex", "principal mapping");
   assert(
     session.result?.capabilities?.includes("browser.capture.series"),

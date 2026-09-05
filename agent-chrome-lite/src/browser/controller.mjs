@@ -831,7 +831,41 @@ export class BrowserController extends EventEmitter {
 
   async fillBackendNode(backendNodeId, value) {
     await this.cdp.send("DOM.focus", { backendNodeId });
+    await this.clearFieldValue(backendNodeId);
     return this.fillFocused(value);
+  }
+
+  async clearFieldValue(backendNodeId) {
+    // Controlled inputs (React & co.) can ignore synthetic select-all +
+    // Backspace; clearing through the native value setter plus input/change
+    // events is the path their onChange handlers actually observe.
+    const { object } = await this.cdp.send("DOM.resolveNode", { backendNodeId });
+    try {
+      await this.cdp.send("Runtime.callFunctionOn", {
+        objectId: object.objectId,
+        functionDeclaration: `function() {
+          const el = this;
+          if (el.isContentEditable) {
+            el.textContent = "";
+            el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            return;
+          }
+          if (!("value" in el)) return;
+          const proto = el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+          const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+          if (descriptor && descriptor.set) descriptor.set.call(el, "");
+          else el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        }`,
+      });
+    } finally {
+      await this.cdp.send("Runtime.releaseObject", {
+        objectId: object.objectId,
+      }).catch(() => {});
+    }
   }
 
   async fillVisualPoint(point, value) {

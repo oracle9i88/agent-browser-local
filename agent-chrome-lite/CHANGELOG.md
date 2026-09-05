@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.0-beta.15 — 2026-09-06
+
+- 修复 `browser.fill` 对受控输入框（React 类）只追加、不替换的真实缺陷：合成 Cmd+A + Backspace 清空在这类组件上不可靠，现改为聚焦后先经 CDP `DOM.resolveNode` + `Runtime.callFunctionOn` 走原生 value setter 清空并派发 `input`/`change` 事件（contenteditable 走 `textContent` + `InputEvent`），再逐字输入，受控组件的 onChange 能正确观测到新值。
+- 已在真实 Suno 会话验收：两首串名歌曲 `Nocturne for Solo PianoWater Colors` 经语义 fill 改名为 `Water Colors`，刷新后保持。视觉 fill（`webContents.selectAll` 路径）本轮未改动。
+
 ## v0.3.0-beta.14 — 2026-09-05
 
 - 将 Suno 实际使用中的 `/studio-welcome` 跳转页纳入精确贡献白名单，避免已登录用户首次进入 Studio 时被本地安全层误冻结。
