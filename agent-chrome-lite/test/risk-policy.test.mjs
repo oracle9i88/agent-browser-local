@@ -5,6 +5,7 @@ import {
   classifyAction,
   classifySnapshotSurface,
 } from "../src/security/risk-policy.mjs";
+import { CAPABILITIES } from "../src/constants.mjs";
 
 test("blocks final submit and publish controls", () => {
   for (const node of [
@@ -82,14 +83,61 @@ test("blocks Suno credit actions", () => {
   assert.equal(risk.code, "credit_action_requires_handoff");
 });
 
-test("Get Stems/MIDI is delegated via finalize gate, not credit handoff", () => {
+test("Get Stems/MIDI remains a credit handoff", () => {
   const risk = classifyAction({
     action: "click",
     node: { tag: "button", role: "button", name: "Get Stems / MIDI Pro" },
   });
   assert.equal(risk.blocked, true);
-  assert.equal(risk.code, "stem_download_requires_finalize");
-  assert.equal(risk.delegableCapability, "browser.finalize.ref");
+  assert.equal(risk.code, "credit_action_requires_handoff");
+});
+
+test("Studio Multitrack downloads use the finalize gate", () => {
+  for (const name of ["Multitrack", "Multi-track"]) {
+    const result = classifyAction({
+      action: "click",
+      node: { role: "menuitem", name },
+      url: "https://suno.com/studio/song/abc",
+    });
+    assert.equal(result.code, "studio_download_requires_finalize");
+    assert.equal(result.delegableCapability, CAPABILITIES.FINALIZE);
+  }
+});
+
+test("Studio clip WAV download requires a real-user handoff", () => {
+  const result = classifyAction({
+    action: "click",
+    node: { role: "button", name: "Download .WAV" },
+    url: "https://suno.com/studio",
+  });
+  assert.equal(result.blocked, true);
+  assert.equal(result.code, "studio_single_track_requires_handoff");
+  assert.equal(result.delegableCapability, undefined);
+});
+
+test("Open in Studio multi-track creation remains a credit handoff", () => {
+  const result = classifyAction({
+    action: "click",
+    node: {
+      role: "button",
+      name: "Multi-track Separate stems (50 credits)",
+    },
+    url: "https://suno.com/create",
+  });
+  assert.equal(result.blocked, true);
+  assert.equal(result.code, "credit_action_requires_handoff");
+  assert.equal(result.delegableCapability, undefined);
+});
+
+test("song-page formats never receive a Studio download permit", () => {
+  for (const name of ["Download", "MP3", "WAV", "MP4 Video Asset", "Multitrack"]) {
+    const result = classifyAction({
+      action: "click",
+      node: { role: "menuitem", name },
+      url: "https://suno.com/song/example",
+    });
+    assert.notEqual(result.code, "studio_download_requires_finalize");
+  }
 });
 
 test("allows navigation links named Create", () => {

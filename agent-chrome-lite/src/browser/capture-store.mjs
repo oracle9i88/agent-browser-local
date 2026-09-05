@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -62,16 +62,23 @@ export class CaptureStore {
   }
 
   /** 写一屏 PNG，登记到 manifest 数组。index 从 1 开始。 */
-  async writeShot(capture, { dataBase64, pageY, viewportHeight, url }) {
+  async writeShot(
+    capture,
+    { dataBase64, pageY, viewportHeight, url, stabilitySha256, stabilityRegion },
+  ) {
     const index = capture.shots.length + 1;
     const file = `shot-${String(index).padStart(2, "0")}.png`;
-    await writeFile(path.join(capture.dir, file), Buffer.from(dataBase64, "base64"));
+    const image = Buffer.from(dataBase64, "base64");
+    await writeFile(path.join(capture.dir, file), image);
     const shot = {
       index,
       file,
       pageY: Math.round(Number(pageY) || 0),
       viewportHeight: Math.round(Number(viewportHeight) || 0),
       url: safeUrlForManifest(url),
+      imageSha256: createHash("sha256").update(image).digest("hex"),
+      stabilitySha256: stabilitySha256 || null,
+      stabilityRegion: stabilityRegion || null,
       capturedAt: Date.now(),
     };
     capture.shots.push(shot);

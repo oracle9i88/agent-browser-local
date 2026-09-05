@@ -65,7 +65,16 @@ const PLATFORM_REGISTRY = Object.freeze({
     contributionTargets: Object.freeze([
       Object.freeze({
         origin: "https://suno.com",
-        pathPrefixes: Object.freeze(["/create", "/studio", "/song", "/me"]),
+        // Suno redirects first-time Studio visits to /studio-welcome before
+        // entering /studio. Keep that onboarding surface contribution-scoped
+        // without opening discovery/library pages.
+        pathPrefixes: Object.freeze([
+          "/create",
+          "/studio",
+          "/studio-welcome",
+          "/song",
+          "/me",
+        ]),
       }),
     ]),
   }),

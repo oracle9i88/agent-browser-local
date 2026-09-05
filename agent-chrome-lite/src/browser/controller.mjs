@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -17,6 +18,38 @@ import { CaptureStore, sanitizeCaptureLabel } from "./capture-store.mjs";
 import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
 
 const DEFAULT_DOWNLOADS_DIR = path.join(os.homedir(), "Downloads");
+const DOWNLOAD_PERMIT_TTL_MS = 15_000;
+
+export function isSunoStudioUrl(value) {
+  try {
+    const url = new URL(value);
+    return (
+      url.origin === "https://suno.com" &&
+      (url.pathname === "/studio" || url.pathname.startsWith("/studio/"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeDownloadFilename(input) {
+  const base = path.basename(String(input || "").replaceAll("\\", "/"));
+  const extension = path.extname(base).slice(0, 16);
+  const stem = base.slice(0, Math.max(0, base.length - extension.length));
+  const safeStem = sanitizeCaptureLabel(stem).slice(0, 96) || "download";
+  const safeExtension = /^\.[A-Za-z0-9]{1,15}$/.test(extension) ? extension : "";
+  return `${safeStem}${safeExtension}`;
+}
+
+export function availableDownloadPath(directory, filename, pathExists = existsSync) {
+  const parsed = path.parse(filename);
+  for (let index = 1; index <= 999; index += 1) {
+    const suffix = index === 1 ? "" : ` (${index})`;
+    const candidate = path.join(directory, `${parsed.name}${suffix}${parsed.ext}`);
+    if (!pathExists(candidate)) return candidate;
+  }
+  throw new Error("download_name_exhausted");
+}
 
 function parseAnchor(anchor) {
   // anchor 形如 { kind: "coords", x: 0.9, y: 0.5 }
@@ -39,6 +72,10 @@ function parseAnchor(anchor) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function screenshotDigest(dataBase64) {
+  return createHash("sha256").update(String(dataBase64 || ""), "base64").digest("hex");
 }
 
 export async function waitForNavigationQuiet({
@@ -162,6 +199,8 @@ export class BrowserController extends EventEmitter {
     this.downloadsDir = downloadsDir || DEFAULT_DOWNLOADS_DIR;
     this.downloads = new Map(); // downloadId → record
     this.downloadCounter = 0;
+    this.sunoDownloadPermit = null;
+    this.sunoDownloadPermitTimer = null;
 
     const reconcileContributionScope = (url) => {
       const transition = contributionScopeTransition(
@@ -218,26 +257,91 @@ export class BrowserController extends EventEmitter {
       this.recoverPage();
     });
 
-    // 接管 session 下载事件。Suno Studio 的"Get Stems"走的是普通 download，
+    // 接管 session 下载事件。经审计放行的 Suno Studio Multitrack
+    // 走普通 download，
     // 默认会弹系统保存对话框。改写 setSavePath 直接写到 ~/Downloads。
     // Browser.downloadWillBegin / Browser.downloadProgress 由 session 层的
     // 'will-download' 事件触发（Electron 不直接转 CDP 事件）。
     // 部分单元测试用裸 EventEmitter 模拟 webContents，没有 .session 接口，
     // 这里做防御性检查。
     if (webContents.session && typeof webContents.session.on === "function") {
-      webContents.session.on("will-download", (_event, item, _webContents) => {
-        this.handleWillDownload(item).catch(() => undefined);
+      webContents.session.on("will-download", (_event, item, sourceContents) => {
+        this.handleWillDownload(item, sourceContents).catch(() => undefined);
       });
     }
   }
 
-  async handleWillDownload(item) {
+  armSunoDownload({ principal, ttlMs = DOWNLOAD_PERMIT_TTL_MS } = {}) {
+    const pageUrl = this.webContents.getURL();
+    if (!isSunoStudioUrl(pageUrl)) {
+      const error = new Error("Suno downloads can only be armed from Suno Studio");
+      error.code = "suno_studio_required";
+      throw error;
+    }
+    const permit = {
+      permitId: randomUUID(),
+      principal: String(principal || ""),
+      pageUrl,
+      expiresAt: Date.now() + Math.max(1_000, Math.min(30_000, Number(ttlMs) || DOWNLOAD_PERMIT_TTL_MS)),
+    };
+    if (this.sunoDownloadPermitTimer) clearTimeout(this.sunoDownloadPermitTimer);
+    this.sunoDownloadPermit = permit;
+    this.sunoDownloadPermitTimer = setTimeout(() => {
+      if (this.sunoDownloadPermit?.permitId === permit.permitId) {
+        this.sunoDownloadPermit = null;
+      }
+      this.sunoDownloadPermitTimer = null;
+    }, permit.expiresAt - Date.now());
+    this.sunoDownloadPermitTimer.unref?.();
+    return { permitId: permit.permitId, expiresAt: permit.expiresAt };
+  }
+
+  disarmSunoDownload(permitId) {
+    if (!permitId || this.sunoDownloadPermit?.permitId === permitId) {
+      this.sunoDownloadPermit = null;
+      if (this.sunoDownloadPermitTimer) clearTimeout(this.sunoDownloadPermitTimer);
+      this.sunoDownloadPermitTimer = null;
+    }
+  }
+
+  consumeSunoDownloadPermit(sourceContents) {
+    const permit = this.sunoDownloadPermit;
+    this.sunoDownloadPermit = null;
+    if (this.sunoDownloadPermitTimer) clearTimeout(this.sunoDownloadPermitTimer);
+    this.sunoDownloadPermitTimer = null;
+    if (!permit || permit.expiresAt < Date.now()) return null;
+    if (
+      !isSunoStudioUrl(this.webContents.getURL()) ||
+      this.webContents.getURL() !== permit.pageUrl
+    ) return null;
+    if (
+      !sourceContents ||
+      this.webContents?.id == null ||
+      sourceContents.id !== this.webContents.id
+    ) {
+      return null;
+    }
+    return permit;
+  }
+
+  async handleWillDownload(item, sourceContents) {
+    const permit = this.consumeSunoDownloadPermit(sourceContents);
+    // No audited, one-shot Suno permit: leave Electron's normal human download
+    // handling untouched. In particular, never silently choose a save path.
+    if (!permit) return { handled: false };
     this.downloadCounter += 1;
     const downloadId = `dl_${this.downloadCounter}_${randomUUID().slice(0, 8)}`;
     const suggestedFilename = item.getFilename() || "";
-    const safeName = sanitizeCaptureLabel(suggestedFilename).slice(0, 128) ||
-      `download-${Date.now()}`;
-    const savePath = path.join(this.downloadsDir, safeName);
+    const safeName = sanitizeDownloadFilename(suggestedFilename);
+    const savePath = availableDownloadPath(
+      this.downloadsDir,
+      safeName,
+      (candidate) =>
+        existsSync(candidate) ||
+        [...this.downloads.values()].some(
+          (record) => record.savePath === candidate && !record.finishedAt,
+        ),
+    );
     item.setSavePath(savePath);
     const record = {
       downloadId,
@@ -250,8 +354,16 @@ export class BrowserController extends EventEmitter {
       startedAt: Date.now(),
       finishedAt: null,
       error: null,
+      permitId: permit.permitId,
+      principal: permit.principal,
     };
     this.downloads.set(downloadId, record);
+    this.emit("download", {
+      event: "browser.download.started",
+      principal: permit.principal,
+      downloadId,
+      filename: safeName,
+    });
     item.on("updated", (_event, state) => {
       const current = this.downloads.get(downloadId);
       if (!current) return;
@@ -269,8 +381,26 @@ export class BrowserController extends EventEmitter {
       current.error = error;
     };
     item.once("done", (_event, state) => {
-      finalize(state === "completed" ? "completed" : "failed", state);
+      // Electron reports the terminal state as the second `done` argument.
+      // A successful completion is not an error; keeping the literal
+      // "completed" in `error` makes callers treat a valid download as a
+      // partial failure.
+      finalize(
+        state === "completed" ? "completed" : "failed",
+        state === "completed" ? null : state,
+      );
+      this.emit("download", {
+        event: state === "completed"
+          ? "browser.download.completed"
+          : "browser.download.failed",
+        principal: permit.principal,
+        downloadId,
+        filename: safeName,
+        receivedBytes: item.getReceivedBytes(),
+        totalBytes: item.getTotalBytes(),
+      });
     });
+    return { handled: true, downloadId };
   }
 
   async initialize() {
@@ -423,7 +553,10 @@ export class BrowserController extends EventEmitter {
     };
   }
 
-  async resolveVisualPoint({ screenshotId, x, y }) {
+  async resolveVisualPoint(
+    { screenshotId, x, y },
+    { promoteEditable = false } = {},
+  ) {
     this.assertPageAvailable();
     const state = this.screenshotState;
     if (
@@ -453,11 +586,17 @@ export class BrowserController extends EventEmitter {
     });
     const hitBackendNodeId = hit.backendNodeId;
     if (!hitBackendNodeId) throw new Error("No DOM node exists at the visual point");
-    const editable = await resolveEditableFromSemanticHint(
-      this.cdp,
-      hitBackendNodeId,
-      "",
-    ).catch(() => null);
+    // Only visual-fill needs to promote a rich-editor container to its
+    // editable descendant. Doing this for ordinary/secondary clicks can turn
+    // an unrelated canvas hit into the page's sole textarea, corrupting both
+    // risk classification and audit attribution.
+    const editable = promoteEditable
+      ? await resolveEditableFromSemanticHint(
+          this.cdp,
+          hitBackendNodeId,
+          "",
+        ).catch(() => null)
+      : null;
     const backendNodeId = editable?.backendNodeId || hitBackendNodeId;
     const metadata = editable?.metadata || await readNodeMetadata(this.cdp, backendNodeId);
     const ax = await this.cdp.send("Accessibility.getPartialAXTree", {
@@ -478,7 +617,42 @@ export class BrowserController extends EventEmitter {
     return { backendNodeId, node, point: { x, y } };
   }
 
-  async clickRef(ref) {
+  resolveVisualAnchor(anchor) {
+    this.assertPageAvailable();
+    const state = this.screenshotState;
+    if (
+      !anchor ||
+      anchor.kind !== "visual" ||
+      !state ||
+      state.screenshotId !== anchor.screenshotId ||
+      state.url !== this.webContents.getURL() ||
+      Date.now() - state.createdAt > 60_000
+    ) {
+      const error = new Error("Capture anchor is stale; take a fresh screenshot");
+      error.code = "stale_visual_ref";
+      throw error;
+    }
+    const x = Number(anchor.x);
+    const y = Number(anchor.y);
+    if (
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      x < 0 ||
+      y < 0 ||
+      x > state.width ||
+      y > state.height
+    ) {
+      const error = new Error("Capture anchor is outside the current screenshot");
+      error.code = "invalid_visual_anchor";
+      throw error;
+    }
+    return {
+      x: state.width > 0 ? x / state.width : 0,
+      y: state.height > 0 ? y / state.height : 0,
+    };
+  }
+
+  async clickRef(ref, { mouseButton = "left" } = {}) {
     const { backendNodeId } = this.resolveRef(ref);
     await this.cdp.send("DOM.scrollIntoViewIfNeeded", { backendNodeId });
     await delay(220);
@@ -487,12 +661,12 @@ export class BrowserController extends EventEmitter {
     });
     const point = pointFromQuads(quads);
     if (!point) throw new Error("Target has no clickable viewport geometry");
-    await this.clickPoint(point);
+    await this.clickPoint(point, { mouseButton });
     return { ok: true };
   }
 
-  async clickVisual(point) {
-    await this.clickPoint(point);
+  async clickVisual(point, { mouseButton = "left" } = {}) {
+    await this.clickPoint(point, { mouseButton });
     return { ok: true };
   }
 
@@ -504,7 +678,7 @@ export class BrowserController extends EventEmitter {
     let totalDeltaY = 0;
     let reachedEnd = false;
     let documentScrollRangeObserved = false;
-    let innerLastScrollY = null;
+    let innerNoChangeCount = 0;
     const isInner = Boolean(anchorPoint);
     for (let index = 0; index < maxSteps; index += 1) {
       const metrics = await this.cdp.send("Page.getLayoutMetrics");
@@ -541,6 +715,12 @@ export class BrowserController extends EventEmitter {
       const anchorY = anchorPoint
         ? Math.round(height * anchorPoint.y)
         : Math.round(height / 2);
+      const beforeDigest = isInner
+        ? screenshotDigest((await this.cdp.send("Page.captureScreenshot", {
+            format: "png",
+            captureBeyondViewport: false,
+          })).data)
+        : null;
       await this.cdp.send("Input.dispatchMouseEvent", {
         type: "mouseWheel",
         x: anchorX,
@@ -556,20 +736,21 @@ export class BrowserController extends EventEmitter {
           : 180,
       );
 
-      // 内层容器模式：用 layout metrics 滚动后的 pageY 对比判断是否到底。
-      // 文档几何无法证明内层容器边界；连续两次无位移即认为到顶/到底。
+      // 内层容器不会改变顶层页面 pageY。使用当前视口截图的 SHA-256
+      // 判断滚轮后是否有可见变化；连续两次不变才保守地报告到底。
+      // 动画造成的变化只会让 reachedEnd 保持 false，不会制造假阳性。
       if (isInner) {
-        const postMetrics = await this.cdp.send("Page.getLayoutMetrics");
-        const postVisual = postMetrics.cssVisualViewport || postMetrics.visualViewport || {};
-        const postPageY = Math.max(
-          0,
-          Number(postVisual.pageY) || 0,
-        );
-        if (innerLastScrollY !== null && postPageY === innerLastScrollY) {
+        const afterDigest = screenshotDigest((await this.cdp.send(
+          "Page.captureScreenshot",
+          { format: "png", captureBeyondViewport: false },
+        )).data);
+        innerNoChangeCount = afterDigest === beforeDigest
+          ? innerNoChangeCount + 1
+          : 0;
+        if (innerNoChangeCount >= 2) {
           reachedEnd = true;
           break;
         }
-        innerLastScrollY = postPageY;
       }
     }
     if (
@@ -605,7 +786,13 @@ export class BrowserController extends EventEmitter {
     };
   }
 
-  async clickPoint({ x, y }) {
+  async clickPoint({ x, y }, { mouseButton = "left" } = {}) {
+    if (!new Set(["left", "right"]).has(mouseButton)) {
+      const error = new Error("mouseButton must be left or right");
+      error.code = "invalid_mouse_button";
+      throw error;
+    }
+    const buttons = mouseButton === "right" ? 2 : 1;
     await this.cdp.send("Input.dispatchMouseEvent", {
       type: "mouseMoved",
       x,
@@ -617,8 +804,8 @@ export class BrowserController extends EventEmitter {
       type: "mousePressed",
       x,
       y,
-      button: "left",
-      buttons: 1,
+      button: mouseButton,
+      buttons,
       clickCount: 1,
     });
     await delay(75);
@@ -626,7 +813,7 @@ export class BrowserController extends EventEmitter {
       type: "mouseReleased",
       x,
       y,
-      button: "left",
+      button: mouseButton,
       buttons: 0,
       clickCount: 1,
     });
@@ -805,10 +992,14 @@ export class BrowserController extends EventEmitter {
   async captureSeries({ label, anchor, maxShots = 12 } = {}) {
     this.assertPageAvailable();
     const shots = Math.max(1, Math.min(60, Math.round(Number(maxShots) || 12)));
-    const anchorPoint = parseAnchor(anchor); // throws on CSS/XPath
+    // Series capture is a privileged Suno workflow. Its coordinate must be
+    // derived from a current screenshot, never a reusable fixed coordinate.
+    const anchorPoint = this.resolveVisualAnchor(anchor);
     const capture = await this.captureStore.begin(label);
     let stopReason = "max_shots";
     let reachedEnd = false;
+    let lastImageSha256 = null;
+    let noChangeCount = 0;
     try {
       for (let index = 0; index < shots; index += 1) {
         const metrics = await this.cdp.send("Page.getLayoutMetrics");
@@ -822,16 +1013,58 @@ export class BrowserController extends EventEmitter {
           Number(visual.pageY) || Number(viewport.pageY) || 0,
         );
 
-        const { data } = await this.cdp.send("Page.captureScreenshot", {
-          format: "png",
-          captureBeyondViewport: false,
-        });
-        await this.captureStore.writeShot(capture, {
+        const { data } = await this.cdp.send(
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            captureBeyondViewport: false,
+          },
+          { timeoutMs: 30_000 },
+        );
+        // Suno 的 Magic Bar 会不断轮换提示语，整屏哈希即使轨道已到底也会变化。
+        // 到底判定只观察左侧轨道编号/名称栏；完整 PNG 仍原样保存给用户。
+        const stabilityRegion = {
+          x: 0,
+          y: Math.min(70, Math.max(0, height - 1)),
+          width: Math.min(320, width),
+          height: Math.max(1, height - Math.min(170, height - 1)),
+          scale: 1,
+        };
+        const stabilityCapture = await this.cdp.send(
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            captureBeyondViewport: false,
+            clip: stabilityRegion,
+          },
+          { timeoutMs: 30_000 },
+        );
+        const stabilitySha256 = screenshotDigest(stabilityCapture.data);
+        const shot = await this.captureStore.writeShot(capture, {
           dataBase64: data,
           pageY,
           viewportHeight: height,
           url: this.webContents.getURL(),
+          stabilitySha256,
+          stabilityRegion: {
+            x: stabilityRegion.x,
+            y: stabilityRegion.y,
+            width: stabilityRegion.width,
+            height: stabilityRegion.height,
+          },
         });
+
+        if (lastImageSha256 !== null) {
+          noChangeCount = shot.stabilitySha256 === lastImageSha256
+            ? noChangeCount + 1
+            : 0;
+          if (noChangeCount >= 2) {
+            stopReason = "visual_stable_after_two_scrolls";
+            reachedEnd = true;
+            break;
+          }
+        }
+        lastImageSha256 = shot.stabilitySha256;
 
         // 最后一屏不再滚
         if (index === shots - 1) {
@@ -854,18 +1087,6 @@ export class BrowserController extends EventEmitter {
             deltaY,
           });
           await delay(420 + Math.floor(Math.random() * 260));
-          const post = await this.cdp.send("Page.getLayoutMetrics");
-          const postVisual =
-            post.cssVisualViewport || post.visualViewport || {};
-          const postY = Math.max(
-            0,
-            Number(postVisual.pageY) || 0,
-          );
-          if (postY === pageY) {
-            stopReason = "no_scroll_progress";
-            reachedEnd = true;
-            break;
-          }
         } else {
           const scrollResult = await this.scroll({
             direction: "down",
@@ -910,10 +1131,10 @@ export class BrowserController extends EventEmitter {
     };
   }
 
-  downloadStatus({ downloadId, includeCompleted = false } = {}) {
+  downloadStatus({ downloadId, includeCompleted = false, principal } = {}) {
     if (downloadId) {
       const record = this.downloads.get(downloadId);
-      if (!record) {
+      if (!record || (principal && record.principal !== principal)) {
         const error = new Error(`Unknown downloadId: ${downloadId}`);
         error.code = "unknown_download";
         throw error;
@@ -922,6 +1143,7 @@ export class BrowserController extends EventEmitter {
     }
     const all = [];
     for (const record of this.downloads.values()) {
+      if (principal && record.principal !== principal) continue;
       if (!includeCompleted && record.finishedAt) continue;
       all.push(record);
     }
@@ -929,6 +1151,7 @@ export class BrowserController extends EventEmitter {
   }
 
   close() {
+    this.disarmSunoDownload();
     this.cdp.detach();
   }
 }

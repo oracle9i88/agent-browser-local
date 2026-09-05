@@ -98,14 +98,17 @@ server.registerTool(
 server.registerTool(
   "browser_click",
   {
-    description: "Click a control by a fresh Snapshot ref. Irreversible, auth and credit actions are blocked by the daemon.",
-    inputSchema: { ref: z.string().min(1) },
+    description: "Left-click or right-click a control by a fresh Snapshot ref. Irreversible, auth and credit actions are blocked by the daemon.",
+    inputSchema: {
+      ref: z.string().min(1),
+      mouseButton: z.enum(["left", "right"]).default("left"),
+    },
   },
-  async ({ ref }) =>
+  async ({ ref, mouseButton }) =>
     textResult(
       await api("/v1/actions/click", {
         method: "POST",
-        body: JSON.stringify({ ref }),
+        body: JSON.stringify({ ref, mouseButton }),
       }),
     ),
 );
@@ -204,18 +207,19 @@ server.registerTool(
 server.registerTool(
   "browser_click_visual",
   {
-    description: "Click a point from the current screenshot only. Fixed or remembered coordinates are rejected as stale.",
+    description: "Left-click or right-click a point from the current screenshot only. Fixed or remembered coordinates are rejected as stale.",
     inputSchema: {
       screenshotId: z.string().uuid(),
       x: z.number().nonnegative(),
       y: z.number().nonnegative(),
+      mouseButton: z.enum(["left", "right"]).default("left"),
     },
   },
-  async ({ screenshotId, x, y }) =>
+  async ({ screenshotId, x, y, mouseButton }) =>
     textResult(
       await api("/v1/actions/visual-click", {
         method: "POST",
-        body: JSON.stringify({ screenshotId, x, y }),
+        body: JSON.stringify({ screenshotId, x, y, mouseButton }),
       }),
     ),
 );
@@ -245,11 +249,12 @@ server.registerTool(
       maxShots: z.number().int().min(1).max(60).default(12),
       anchor: z
         .object({
-          kind: z.literal("coords"),
-          x: z.number().min(0).max(1),
-          y: z.number().min(0).max(1),
+          kind: z.literal("visual"),
+          screenshotId: z.string().uuid(),
+          x: z.number().min(0),
+          y: z.number().min(0),
         })
-        .optional(),
+        .describe("A point selected from a current browser_screenshot result; expires after 60 seconds."),
     },
   },
   async ({ label, maxShots, anchor }) =>

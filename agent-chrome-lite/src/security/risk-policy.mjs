@@ -9,6 +9,7 @@ const destructiveOrPaymentWords = [
 ];
 
 const creditWords = [
+  /\b\d+\s*credits?\b/i,
   /create\s+song/i,
   /remaster/i,
   /add\s+(?:instrumental|vocal)/i,
@@ -16,11 +17,32 @@ const creditWords = [
   /生成(?:歌曲|音乐|分轨|midi)/i,
 ];
 
-// Get Stems/MIDI 单独成组：下载用户已生成内容的分轨，不生成新内容、
-// 不消耗生成积分（Suno Studio 下载在 2026-09 ToS 下不限量）。
-// 从"不可委托"降为"finalize 权限门"——只有本地权限表明确授予
-// browser.finalize.ref 的 principal 才能代点，逐次写入审计。
-const stemDownloadWords = [/get\s+stems?\s*\/\s*midi/i];
+// 只有真正位于 Suno Studio 内的落盘入口才享受不限额下载规则。
+// 普通歌曲页的 Download/MP3/WAV 计入月度额度；Get MIDI 可能消耗
+// credits，二者都不能借 Studio 的一次性下载许可放行。
+const studioDownloadWords = [
+  /^multi-?track$/i,
+];
+
+// Suno accepts Multitrack as a normal browser download after an audited click.
+// Clip-level Download .WAV is different: the site requires a real user gesture
+// and did not start a download in packaged-app validation. Keep it manual-only
+// instead of claiming unreliable automation support.
+const studioManualDownloadWords = [/^download\s*\.?\s*wav$/i];
+
+const getMidiWords = [/get\s+(?:stems?\s*\/\s*)?midi/i];
+
+function isSunoStudioUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.origin === "https://suno.com" &&
+      (parsed.pathname === "/studio" || parsed.pathname.startsWith("/studio/"))
+    );
+  } catch {
+    return false;
+  }
+}
 
 const authWords = [
   /sign\s*in|log\s*in|verify|verification|captcha|one[- ]time code/i,
@@ -163,12 +185,27 @@ export function classifyAction({ action, node, url }) {
       delegableCapability: "browser.finalize.ref",
     };
   }
-  if (matchesAny(text, stemDownloadWords)) {
+  if (matchesAny(text, getMidiWords)) {
     return {
       blocked: true,
-      code: "stem_download_requires_finalize",
+      code: "credit_action_requires_handoff",
+      reason: "Get MIDI 可能消耗 credits，必须交给用户本人确认。",
+    };
+  }
+  if (isSunoStudioUrl(url) && matchesAny(textOf(node), studioManualDownloadWords)) {
+    return {
+      blocked: true,
+      code: "studio_single_track_requires_handoff",
       reason:
-        "下载分轨（Get Stems/MIDI）需要本地权限表明确授予 browser.finalize.ref 的 Agent 执行，或由用户本人完成。",
+        "Suno Studio 单轨 Download .WAV 与系统保存流程需要用户本人完成；Agent 只能把片段菜单准备好。",
+    };
+  }
+  if (isSunoStudioUrl(url) && matchesAny(textOf(node), studioDownloadWords)) {
+    return {
+      blocked: true,
+      code: "studio_download_requires_finalize",
+      reason:
+        "Suno Studio 导出到本机需要本地权限表明确授予 browser.finalize.ref 的 Agent 执行，或由用户本人完成。",
       delegableCapability: "browser.finalize.ref",
     };
   }

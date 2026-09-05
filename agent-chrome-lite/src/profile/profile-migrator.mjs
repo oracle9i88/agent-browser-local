@@ -41,12 +41,20 @@ export const MIGRATION_PLATFORM_OFFERS = Object.freeze([
     label: "Suno",
     startUrl: "https://app.suno.ai",
     domains: Object.freeze(["suno.com", "auth.suno.com", "app.suno.ai"]),
-    requiredCookieNames: Object.freeze(["__client", "__session"]),
+    requiredCookieNames: Object.freeze(["__session", "__client"]),
     cookieNames: Object.freeze([
-      "__client",
       "__session",
+      "__session_Jnxw-muT",
+      "__client",
+      "__client_Jnxw-muT",
+      "sessionid",
       "__client_uat",
-      "__clerk_db_jwt",
+      "__client_uat_Jnxw-muT",
+      // Suno/Clerk currently needs these first-party context markers to turn
+      // a valid session cookie into an active signed-in UI. They contain no
+      // Google identity data and remain inside the Agent Space cookie store.
+      "clerk_active_context",
+      "suno_session_recoverable",
     ]),
   },
   {
@@ -198,6 +206,13 @@ function normalizeCookieForInjection(cookie, selectedDomains) {
     name: String(cookie.name),
     value: String(cookie.value),
     domain: cookie.domain,
+    // Chrome distinguishes a host-only cookie (`suno.com`) from a domain
+    // cookie (`.suno.com`). Electron turns any explicit `domain` field into a
+    // domain cookie, so passing `domain: "suno.com"` silently collapses the
+    // two identities and can overwrite the real login cookie. Keep the source
+    // identity for verification/rollback, but omit `domain` from cookies.set
+    // for host-only cookies.
+    hostOnly: !String(cookie.domain || "").startsWith("."),
     path: cookie.path || "/",
     secure: cookie.secure !== false,
     httpOnly: cookie.httpOnly === true,
@@ -206,6 +221,12 @@ function normalizeCookieForInjection(cookie, selectedDomains) {
       ? { expirationDate: cookie.expires }
       : {}),
   };
+}
+
+function cookieSetDetails(cookie) {
+  const { hostOnly, ...details } = cookie;
+  if (hostOnly) delete details.domain;
+  return details;
 }
 
 function normalizeSameSite(value) {
@@ -249,6 +270,22 @@ async function collectPlatformCookies(offer, domains, cdp) {
     const normalized = normalizeCookieForInjection(cookie, domains);
     if (normalized) injected.push(normalized);
   }
+  // Chrome can expose both host-only `suno.com` and domain `.suno.com`
+  // cookies with the same name/path. Electron's cookie store does not
+  // reliably preserve both identities; the later set may silently replace
+  // the other. Suno's current Clerk flow verifies the host-only session
+  // together with auth.suno.com client cookies, so prefer host-only when both
+  // exist and inject exactly one deterministic value for the canonical key.
+  const deduplicated = new Map();
+  for (const cookie of injected) {
+    const key = `${cookie.name}|${normalizeDomain(cookie.domain)}|${cookie.path || "/"}`;
+    const existing = deduplicated.get(key);
+    if (!existing || (!existing.hostOnly && cookie.hostOnly)) {
+      deduplicated.set(key, cookie);
+    }
+  }
+  injected.length = 0;
+  injected.push(...deduplicated.values());
   const missing = offer.requiredCookieNames.filter(
     (name) => !injected.some((cookie) => cookie.name === name),
   );
@@ -263,8 +300,15 @@ async function collectPlatformCookies(offer, domains, cdp) {
 
 async function verifyInjectedCookies(cookieStore, collected) {
   for (const cookie of collected.cookies) {
-    const found = await cookieStore.get({ name: cookie.name, domain: cookie.domain });
-    if (!Array.isArray(found) || found.length === 0) {
+    const found = await cookieStore.get({ name: cookie.name });
+    const expectedDomain = String(cookie.domain || "");
+    const expectedPath = cookie.path || "/";
+    const exact = (Array.isArray(found) ? found : []).some(
+      (candidate) =>
+        String(candidate.domain || "") === expectedDomain &&
+        String(candidate.path || "/") === expectedPath,
+    );
+    if (!exact) {
       throw sanitizedError(
         `迁移向导：${collected.label} 同步后验证未通过`,
         `${collected.platform}_postcheck_failed`,
@@ -471,7 +515,7 @@ export async function runLoginMigration({
   try {
     for (const item of collected) {
       for (const cookie of item.cookies) {
-        await cookieStore.set(cookie);
+        await cookieStore.set(cookieSetDetails(cookie));
         // register immediately: a later set() failure must not orphan
         // earlier cookies of the same platform
         ledger.push(cookie);

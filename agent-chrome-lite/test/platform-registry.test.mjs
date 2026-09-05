@@ -149,6 +149,13 @@ test("platform registration narrows a legacy origin-wide target", () => {
 
 test("suno stays defined but disabled by default and can be removed locally", () => {
   assert.equal(DEFAULT_PLATFORM_IDS.includes("suno"), false);
+  assert.deepEqual(contributionTargetsFor(["suno"]), [
+    {
+      platform: "suno",
+      origin: "https://suno.com",
+      pathPrefixes: ["/create", "/studio", "/studio-welcome", "/song", "/me"],
+    },
+  ]);
   const targets = [
     ...contributionTargetsFor(["xiaoyuzhou"]),
     ...contributionTargetsFor(["suno"]),

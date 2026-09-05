@@ -6,7 +6,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  availableDownloadPath,
   BrowserController,
+  isSunoStudioUrl,
+  sanitizeDownloadFilename,
 } from "../src/browser/controller.mjs";
 import { CaptureStore, sanitizeCaptureLabel } from "../src/browser/capture-store.mjs";
 import { CAPABILITIES } from "../src/constants.mjs";
@@ -56,6 +59,7 @@ test("CaptureStore lays out per-song folder with manifest", async () => {
       await readFile(path.join(capture.dir, "manifest.json"), "utf8"),
     );
     assert.equal(parsedManifest.shotCount, 2);
+    assert.equal(parsedManifest.shots[0].stabilitySha256, null);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -90,12 +94,12 @@ function makeFakeCdp({ scrolls }) {
   };
 }
 
-test("captureSeries stops at reachedEnd with document mode (no anchor)", async () => {
+test("captureSeries uses a fresh visual anchor and requires two stable frames", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "abl-capture-controller-"));
   try {
     const webContents = new EventEmitter();
     webContents.session = new EventEmitter();
-    webContents.getURL = () => "https://example.test/song";
+    webContents.getURL = () => "https://suno.com/studio/song";
     webContents.getTitle = () => "song";
     webContents.isLoading = () => false;
     webContents.isDestroyed = () => true;
@@ -125,23 +129,112 @@ test("captureSeries stops at reachedEnd with document mode (no anchor)", async (
       capturesDir: dir,
     });
     controller.cdp = fakeCdp;
+    controller.screenshotState = {
+      screenshotId: "00000000-0000-4000-8000-000000000001",
+      url: webContents.getURL(),
+      width: 1280,
+      height: 864,
+      createdAt: Date.now(),
+    };
 
     const result = await controller.captureSeries({
       label: "Tragic Grandeur",
       maxShots: 5,
+      anchor: {
+        kind: "visual",
+        screenshotId: controller.screenshotState.screenshotId,
+        x: 230,
+        y: 430,
+      },
     });
-    assert.equal(result.shotCount >= 1, true);
-    assert.equal(typeof result.stopReason, "string");
-    assert.equal(typeof result.reachedEnd, "boolean");
+    assert.equal(result.shotCount, 3);
+    assert.equal(result.stopReason, "visual_stable_after_two_scrolls");
+    assert.equal(result.reachedEnd, true);
 
     const folders = await readdir(dir);
     assert.equal(folders.length, 1);
     const innerFiles = await readdir(path.join(dir, folders[0]));
     assert.ok(innerFiles.includes("manifest.json"));
+    const manifest = JSON.parse(
+      await readFile(path.join(dir, folders[0], "manifest.json"), "utf8"),
+    );
+    assert.equal(manifest.shots[0].stabilityRegion.width, 320);
+    assert.equal(manifest.shots[0].stabilitySha256.length, 64);
     controller.close();
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("captureSeries rejects a reusable fixed-coordinate anchor", async () => {
+  const webContents = new EventEmitter();
+  webContents.session = new EventEmitter();
+  webContents.getURL = () => "https://suno.com/studio/song";
+  webContents.getTitle = () => "song";
+  webContents.isLoading = () => false;
+  webContents.isDestroyed = () => true;
+  webContents.debugger = { isAttached: () => false };
+  webContents.navigationHistory = { canGoBack: () => false, canGoForward: () => false };
+  const controller = new BrowserController(webContents, {
+    security: { maxSnapshotControls: 10, maxSnapshotHints: 5, contributionTargets: [] },
+  });
+  await assert.rejects(
+    controller.captureSeries({
+      label: "x",
+      anchor: { kind: "coords", x: 0.18, y: 0.5 },
+    }),
+    (error) => error.code === "stale_visual_ref",
+  );
+  controller.close();
+});
+
+test("download permit is one-shot, Suno-Studio-only and preserves extensions", async () => {
+  const webContents = new EventEmitter();
+  webContents.id = 42;
+  webContents.session = new EventEmitter();
+  webContents.getURL = () => "https://suno.com/studio/song/abc";
+  webContents.getTitle = () => "song";
+  webContents.isLoading = () => false;
+  webContents.isDestroyed = () => true;
+  webContents.debugger = { isAttached: () => false };
+  webContents.navigationHistory = { canGoBack: () => false, canGoForward: () => false };
+  const controller = new BrowserController(webContents, {
+    security: { maxSnapshotControls: 10, maxSnapshotHints: 5, contributionTargets: [] },
+  }, { downloadsDir: "/tmp" });
+  const permit = controller.armSunoDownload({ principal: "codex" });
+  assert.ok(permit.permitId);
+
+  const item = new EventEmitter();
+  item.getFilename = () => "../My Stems.wav";
+  item.getReceivedBytes = () => 0;
+  item.getTotalBytes = () => 123;
+  let savePath = null;
+  item.setSavePath = (value) => { savePath = value; };
+  const handled = await controller.handleWillDownload(item, { id: 42 });
+  assert.equal(handled.handled, true);
+  assert.match(savePath, /My Stems(?: \(\d+\))?\.wav$/);
+
+  const second = new EventEmitter();
+  second.getFilename = () => "second.zip";
+  let secondPath = null;
+  second.setSavePath = (value) => { secondPath = value; };
+  const ignored = await controller.handleWillDownload(second, { id: 42 });
+  assert.equal(ignored.handled, false);
+  assert.equal(secondPath, null);
+  controller.close();
+});
+
+test("download helpers reject non-Studio URLs and avoid overwriting", () => {
+  assert.equal(isSunoStudioUrl("https://suno.com/studio/abc"), true);
+  assert.equal(isSunoStudioUrl("https://suno.com/create"), false);
+  assert.equal(isSunoStudioUrl("https://evil.example/studio"), false);
+  assert.equal(sanitizeDownloadFilename("../../stems.wav"), "stems.wav");
+  const candidate = availableDownloadPath(
+    "/tmp",
+    "stems.wav",
+    (value) => value.endsWith("stems.wav"),
+  );
+  assert.equal(candidate, "/tmp/stems (2).wav");
 });
 
 test("controller rejects CSS anchor as a security boundary", async () => {
@@ -217,6 +310,7 @@ test("downloadStatus lists in-progress downloads and resolves single by id", () 
     finishedAt: Date.now(),
     receivedBytes: 1024,
     totalBytes: 1024,
+    principal: "codex",
   });
   controller.downloads.set("dl_beta", {
     downloadId: "dl_beta",
@@ -226,22 +320,68 @@ test("downloadStatus lists in-progress downloads and resolves single by id", () 
     finishedAt: null,
     receivedBytes: 512,
     totalBytes: 2048,
+    principal: "codex",
   });
 
-  const all = controller.downloadStatus({});
+  const all = controller.downloadStatus({ principal: "codex" });
   assert.equal(all.count, 1);
   assert.equal(all.downloads[0].downloadId, "dl_beta");
 
-  const allIncluding = controller.downloadStatus({ includeCompleted: true });
+  const allIncluding = controller.downloadStatus({ includeCompleted: true, principal: "codex" });
   assert.equal(allIncluding.count, 2);
 
-  const single = controller.downloadStatus({ downloadId: "dl_alpha" });
+  const single = controller.downloadStatus({ downloadId: "dl_alpha", principal: "codex" });
   assert.equal(single.filename, "stems.wav");
 
   assert.throws(
     () => controller.downloadStatus({ downloadId: "dl_missing" }),
     /Unknown downloadId/,
   );
+  assert.throws(
+    () => controller.downloadStatus({ downloadId: "dl_alpha", principal: "claude" }),
+    /Unknown downloadId/,
+  );
+  controller.close();
+});
+
+test("successful Suno download finishes with a null error", async () => {
+  const webContents = new EventEmitter();
+  const session = new EventEmitter();
+  webContents.session = session;
+  webContents.id = 7;
+  webContents.getURL = () => "https://suno.com/studio";
+  webContents.getTitle = () => "Suno Studio";
+  webContents.isLoading = () => false;
+  webContents.navigationHistory = {
+    canGoBack: () => false,
+    canGoForward: () => false,
+  };
+  webContents.isDestroyed = () => true;
+  webContents.debugger = { isAttached: () => false };
+  const config = {
+    security: {
+      maxSnapshotControls: 10,
+      maxSnapshotHints: 5,
+      contributionTargets: [{ origin: "https://suno.com", pathPrefixes: ["/studio"] }],
+    },
+  };
+  const controller = new BrowserController(webContents, config, {
+    downloadsDir: "/tmp",
+  });
+  controller.armSunoDownload({ principal: "codex" });
+  const item = new EventEmitter();
+  item.getFilename = () => "single-track.wav";
+  item.getReceivedBytes = () => 4096;
+  item.getTotalBytes = () => 4096;
+  item.setSavePath = () => {};
+
+  await controller.handleWillDownload(item, webContents);
+  item.emit("done", {}, "completed");
+
+  const result = controller.downloadStatus({ includeCompleted: true, principal: "codex" });
+  assert.equal(result.count, 1);
+  assert.equal(result.downloads[0].state, "completed");
+  assert.equal(result.downloads[0].error, null);
   controller.close();
 });
 

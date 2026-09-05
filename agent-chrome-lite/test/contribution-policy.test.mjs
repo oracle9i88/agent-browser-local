@@ -8,7 +8,7 @@ const config = {
     contributionTargets: [
       {
         origin: "https://suno.com",
-        pathPrefixes: ["/create", "/studio", "/song/"],
+        pathPrefixes: ["/create", "/studio", "/studio-welcome", "/song/"],
       },
       {
         origin: "https://podcaster.xiaoyuzhoufm.com",
@@ -58,6 +58,7 @@ const config = {
 
 test("allows only configured contribution surfaces", () => {
   assert.equal(isContributionUrlAllowed(config, "https://suno.com/create"), true);
+  assert.equal(isContributionUrlAllowed(config, "https://suno.com/studio-welcome"), true);
   assert.equal(
     isContributionUrlAllowed(config, "https://studio.ximalaya.com/uploadWorks"),
     true,

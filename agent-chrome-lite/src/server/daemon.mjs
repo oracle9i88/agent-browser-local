@@ -32,6 +32,12 @@ export class BrowserDaemon {
     this.config = config;
     this.executor = executor;
     this.audit = audit;
+    this.controller.on?.("download", (entry) => {
+      void this.audit.record({
+        ...entry,
+        url: safeUrl(this.controller.status().url),
+      }).catch(() => undefined);
+    });
   }
 
   requireCapability(identity, capability) {
@@ -49,6 +55,24 @@ export class BrowserDaemon {
       assertContributionUrl(this.config, url);
     } catch (error) {
       throw new DaemonError(403, error.code, error.message);
+    }
+  }
+
+  requireSunoStudioPage(url = this.controller.status().url) {
+    try {
+      const parsed = new URL(url);
+      if (
+        parsed.origin !== "https://suno.com" ||
+        (parsed.pathname !== "/studio" && !parsed.pathname.startsWith("/studio/"))
+      ) {
+        throw new Error("outside Suno Studio");
+      }
+    } catch {
+      throw new DaemonError(
+        403,
+        "suno_studio_required",
+        "This capability is restricted to https://suno.com/studio",
+      );
     }
   }
 
@@ -230,6 +254,7 @@ export class BrowserDaemon {
         this.requireCapability(identity, CAPABILITIES.CAPTURE_SERIES);
         this.requireNoHandoff();
         this.requireContributionPage();
+        this.requireSunoStudioPage();
         const label =
           typeof params.label === "string" ? params.label.slice(0, 200) : "";
         const maxShots = Number(params.maxShots);
@@ -264,6 +289,7 @@ export class BrowserDaemon {
           downloadId:
             typeof params.downloadId === "string" ? params.downloadId : null,
           includeCompleted: Boolean(params.includeCompleted),
+          principal: identity.principal,
         });
         await this.audit.record({
           event: "browser.downloadStatus",
@@ -294,13 +320,31 @@ export class BrowserDaemon {
           await this.recordDelegatedAction(identity, risk, context);
         }
         return this.executor.run(async () => {
-          const result = await this.controller.clickRef(params.ref);
+          let downloadPermit = null;
+          if (risk.code === "studio_download_requires_finalize") {
+            this.requireSunoStudioPage();
+            downloadPermit = this.controller.armSunoDownload({
+              principal: identity.principal,
+            });
+          }
+          let result;
+          try {
+            result = await this.controller.clickRef(params.ref, {
+              mouseButton: params.mouseButton || "left",
+            });
+          } catch (error) {
+            if (downloadPermit) {
+              this.controller.disarmSunoDownload(downloadPermit.permitId);
+            }
+            throw error;
+          }
           await this.audit.record({
             event: "browser.click",
             principal: identity.principal,
             ref: params.ref,
             role: target.node.role,
             name: target.node.name,
+            mouseButton: params.mouseButton || "left",
             url: safeUrl(this.controller.status().url),
           });
           return result;
@@ -331,13 +375,31 @@ export class BrowserDaemon {
           await this.recordDelegatedAction(identity, risk, context);
         }
         return this.executor.run(async () => {
-          const result = await this.controller.clickVisual(target.point);
+          let downloadPermit = null;
+          if (risk.code === "studio_download_requires_finalize") {
+            this.requireSunoStudioPage();
+            downloadPermit = this.controller.armSunoDownload({
+              principal: identity.principal,
+            });
+          }
+          let result;
+          try {
+            result = await this.controller.clickVisual(target.point, {
+              mouseButton: params.mouseButton || "left",
+            });
+          } catch (error) {
+            if (downloadPermit) {
+              this.controller.disarmSunoDownload(downloadPermit.permitId);
+            }
+            throw error;
+          }
           await this.audit.record({
             event: "browser.clickVisual",
             principal: identity.principal,
             screenshotId: params.screenshotId,
             role: target.node.role,
             name: target.node.name,
+            mouseButton: params.mouseButton || "left",
             url: safeUrl(this.controller.status().url),
           });
           return result;
@@ -390,7 +452,9 @@ export class BrowserDaemon {
         if (typeof params.value !== "string" || params.value.length > 100_000) {
           throw new DaemonError(400, "invalid_value", "Fill value is invalid or too large");
         }
-        const target = await this.controller.resolveVisualPoint(params);
+        const target = await this.controller.resolveVisualPoint(params, {
+          promoteEditable: true,
+        });
         const currentUrl = new URL(this.controller.status().url);
         const verifiedXimalayaUploadEditor =
           currentUrl.origin === "https://studio.ximalaya.com" &&

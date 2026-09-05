@@ -7,20 +7,19 @@ import path from "node:path";
 import { createConfig, loadConfig } from "../src/config.mjs";
 import { CAPABILITIES } from "../src/constants.mjs";
 
-test("loading a v2 config adds new capture/download capabilities to existing principals", async () => {
+test("loading a beta.13 v2 config revokes automatically granted Suno capabilities", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "abl-config-capture-"));
   try {
     const configPath = path.join(directory, "config.json");
     const created = await createConfig(configPath);
 
-    // 模拟老 v2（beta.12 及更早）配置：principal 上没有 capture/download 两项
+    // 模拟 beta.13 v2：两个高范围能力曾被自动授予所有 principal。
     const downgraded = JSON.parse(JSON.stringify(created.config));
     downgraded.version = 2;
     for (const agent of downgraded.agents) {
-      agent.capabilities = agent.capabilities.filter(
-        (capability) =>
-          capability !== CAPABILITIES.CAPTURE_SERIES &&
-          capability !== CAPABILITIES.DOWNLOAD_STATUS,
+      agent.capabilities.push(
+        CAPABILITIES.CAPTURE_SERIES,
+        CAPABILITIES.DOWNLOAD_STATUS,
       );
     }
     await writeFile(configPath, `${JSON.stringify(downgraded, null, 2)}\n`, {
@@ -28,17 +27,17 @@ test("loading a v2 config adds new capture/download capabilities to existing pri
     });
 
     const { config } = await loadConfig(configPath);
-    assert.equal(config.version, 2);
+    assert.equal(config.version, 3);
     for (const agent of config.agents) {
       assert.equal(
         agent.capabilities.includes(CAPABILITIES.CAPTURE_SERIES),
-        true,
-        `agent ${agent.principal} should have ${CAPABILITIES.CAPTURE_SERIES}`,
+        false,
+        `agent ${agent.principal} should not retain ${CAPABILITIES.CAPTURE_SERIES}`,
       );
       assert.equal(
         agent.capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS),
-        true,
-        `agent ${agent.principal} should have ${CAPABILITIES.DOWNLOAD_STATUS}`,
+        false,
+        `agent ${agent.principal} should not retain ${CAPABILITIES.DOWNLOAD_STATUS}`,
       );
     }
 
@@ -47,12 +46,9 @@ test("loading a v2 config adds new capture/download capabilities to existing pri
     for (const agent of onDisk.agents) {
       assert.equal(
         agent.capabilities.includes(CAPABILITIES.CAPTURE_SERIES),
-        true,
+        false,
       );
-      assert.equal(
-        agent.capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS),
-        true,
-      );
+      assert.equal(agent.capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS), false);
     }
   } finally {
     await rm(directory, { recursive: true, force: true });

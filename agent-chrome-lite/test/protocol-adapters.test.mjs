@@ -208,7 +208,7 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
       arguments: {
         label: "Tragic Grandeur",
         maxShots: 4,
-        anchor: { kind: "coords", x: 0.18, y: 0.5 },
+        anchor: { kind: "visual", screenshotId: "00000000-0000-4000-8000-000000000001", x: 180, y: 500 },
       },
     });
     assert.match(mcpCapture.content[0].text, /"dirName": "Tragic Grandeur-20260904"/);

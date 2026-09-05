@@ -79,6 +79,7 @@ function errorPayload(error) {
 function errorStatus(error) {
   if (error instanceof DaemonError) return error.status;
   if (["stale_ref", "stale_visual_ref"].includes(error?.code)) return 409;
+  if (["invalid_visual_anchor"].includes(error?.code)) return 400;
   if (["page_unavailable", "cdp_command_timeout"].includes(error?.code)) return 503;
   return 500;
 }

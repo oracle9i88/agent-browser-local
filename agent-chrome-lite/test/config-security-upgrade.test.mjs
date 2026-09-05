@@ -45,7 +45,7 @@ test("loading a legacy config atomically tightens Xiaoyuzhou without rotating to
       config.agents.map((agent) => agent.tokenSha256),
       tokenHashes,
     );
-    assert.equal(config.version, 2);
+    assert.equal(config.version, 3);
     assert.equal(
       config.agents.every((agent) =>
         agent.capabilities.includes(CAPABILITIES.SCROLL),
@@ -54,7 +54,7 @@ test("loading a legacy config atomically tightens Xiaoyuzhou without rotating to
     );
 
     const persisted = JSON.parse(await readFile(configPath, "utf8"));
-    assert.equal(persisted.version, 2);
+    assert.equal(persisted.version, 3);
     assert.deepEqual(persisted.security.contributionTargets, config.security.contributionTargets);
   } finally {
     await rm(directory, { recursive: true, force: true });

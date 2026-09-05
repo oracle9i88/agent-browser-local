@@ -10,7 +10,7 @@ function fixture() {
     handoff: null,
     status() {
       return {
-        url: "https://studio.suno.com/song/abc",
+        url: "https://suno.com/studio/song/abc",
         handoff: this.handoff,
       };
     },
@@ -34,7 +34,7 @@ function fixture() {
       security: {
         uploadRoots: [],
         contributionTargets: [
-          { origin: "https://studio.suno.com", pathPrefixes: ["/"] },
+          { origin: "https://suno.com", pathPrefixes: ["/studio"] },
         ],
       },
     },
@@ -77,7 +77,7 @@ test("captureSeries with CAPTURE_SERIES dispatches and audits", async () => {
   const result = await daemon.dispatch(fullIdentity, "browser.captureSeries", {
     label: "Tragic Grandeur",
     maxShots: 4,
-    anchor: { kind: "coords", x: 0.18, y: 0.5 },
+    anchor: { kind: "visual", screenshotId: "00000000-0000-4000-8000-000000000001", x: 180, y: 500 },
   });
   assert.equal(result.captureId, "cap-1");
   assert.equal(result.reachedEnd, true);
@@ -112,7 +112,7 @@ test("downloadStatus with DOWNLOAD_STATUS returns record and audits", async () =
 
 test("captureSeries rejects out-of-scope URL with contribution policy", async () => {
   const { daemon, fullIdentity } = fixture();
-  // 控制器当前 URL 是 https://studio.suno.com/song/abc (已配置),
+  // 控制器当前 URL 是 https://suno.com/studio/song/abc (已配置),
   // 但 navigate 也会改 URL，所以直接调用的 URL 应不通过 contribution check
   const noContributionDaemon = new BrowserDaemon({
     controller: {
@@ -125,7 +125,7 @@ test("captureSeries rejects out-of-scope URL with contribution policy", async ()
       security: {
         uploadRoots: [],
         contributionTargets: [
-          { origin: "https://studio.suno.com", pathPrefixes: ["/"] },
+          { origin: "https://suno.com", pathPrefixes: ["/studio"] },
         ],
       },
     },
@@ -138,4 +138,69 @@ test("captureSeries rejects out-of-scope URL with contribution policy", async ()
     }),
     (error) => error instanceof DaemonError && error.status === 403,
   );
+});
+
+test("captureSeries rejects an allowed contribution page outside Suno Studio", async () => {
+  const { fullIdentity } = fixture();
+  const daemon = new BrowserDaemon({
+    controller: {
+      status: () => ({ url: "https://suno.com/create", handoff: null }),
+      captureSeries: async () => ({ ok: true }),
+    },
+    config: {
+      security: {
+        uploadRoots: [],
+        contributionTargets: [
+          { origin: "https://suno.com", pathPrefixes: ["/create", "/studio"] },
+        ],
+      },
+    },
+    executor: { run: (task) => task() },
+    audit: { record: async () => undefined },
+  });
+  await assert.rejects(
+    daemon.dispatch(fullIdentity, "browser.captureSeries", { label: "x" }),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 403 &&
+      error.code === "suno_studio_required",
+  );
+});
+
+test("delegated Studio Multitrack click arms one Suno download permit", async () => {
+  let armedFor = null;
+  let clicked = false;
+  const controller = {
+    status: () => ({ url: "https://suno.com/studio/song/abc", handoff: null }),
+    resolveRef: () => ({ node: { role: "menuitem", name: "Multitrack" } }),
+    armSunoDownload: ({ principal }) => {
+      armedFor = principal;
+      return { permitId: "permit-1" };
+    },
+    disarmSunoDownload: () => undefined,
+    clickRef: async () => { clicked = true; return { ok: true }; },
+  };
+  const events = [];
+  const daemon = new BrowserDaemon({
+    controller,
+    config: {
+      security: {
+        uploadRoots: [],
+        contributionTargets: [
+          { origin: "https://suno.com", pathPrefixes: ["/studio"] },
+        ],
+      },
+    },
+    executor: { run: (task) => task() },
+    audit: { record: async (entry) => events.push(entry) },
+  });
+  const identity = {
+    principal: "codex",
+    capabilities: [CAPABILITIES.CLICK, CAPABILITIES.FINALIZE],
+    confirmationPolicy: CONFIRMATION_POLICY,
+  };
+  await daemon.dispatch(identity, "browser.click", { ref: "snapshot:1" });
+  assert.equal(armedFor, "codex");
+  assert.equal(clicked, true);
+  assert.ok(events.some((entry) => entry.code === "studio_download_requires_finalize"));
 });

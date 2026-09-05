@@ -13,7 +13,7 @@ import {
   hardenLegacyContributionTargets,
 } from "./security/platform-registry.mjs";
 
-const CONFIG_VERSION = 2;
+const CONFIG_VERSION = 3;
 const LEGACY_CONFIG_VERSION = 1;
 const DEFAULT_PRINCIPALS = ["codex", "claude", "novage", "novade"];
 
@@ -118,21 +118,22 @@ export async function loadConfig(configPath = defaultConfigPath()) {
         upgradedCapabilities = true;
       }
     }
-    config.version = CONFIG_VERSION;
+    config.version = 2;
   }
-  // 老 v2 配置（beta.13 及更早）没有 capture / download 两个 capability；
-  // 升级时给所有非 finalize 受限的 principal 补齐。
-  for (const agent of config.agents || []) {
-    if (!Array.isArray(agent.capabilities)) continue;
-    for (const capability of [
-      CAPABILITIES.CAPTURE_SERIES,
-      CAPABILITIES.DOWNLOAD_STATUS,
-    ]) {
-      if (!agent.capabilities.includes(capability)) {
-        agent.capabilities.push(capability);
-        upgradedCapabilities = true;
-      }
+  // beta.13 曾把 Suno Studio 的批量截图/下载状态权限自动授予所有
+  // principal。beta.14 收回这次过宽的升级：这两个能力必须由本机维护者
+  // 用 agent-permissions 逐个授予。v3 配置中的显式授权保持不变。
+  if (config.version === 2) {
+    for (const agent of config.agents || []) {
+      if (!Array.isArray(agent.capabilities)) continue;
+      agent.capabilities = agent.capabilities.filter(
+        (capability) =>
+          capability !== CAPABILITIES.CAPTURE_SERIES &&
+          capability !== CAPABILITIES.DOWNLOAD_STATUS,
+      );
     }
+    config.version = CONFIG_VERSION;
+    upgradedCapabilities = true;
   }
   const beforeTargets = JSON.stringify(config.security?.contributionTargets || []);
   if (config.security?.contributionTargets) {

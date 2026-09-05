@@ -1,5 +1,5 @@
 export const PRODUCT_NAME = "Agent Browser Local";
-export const VERSION = "0.3.0-beta.13";
+export const VERSION = "0.3.0-beta.14";
 
 export const CAPABILITIES = Object.freeze({
   STATUS: "browser.status",
@@ -21,7 +21,12 @@ export const CAPABILITIES = Object.freeze({
 // part of the capabilities created for a fresh installation.
 export const DEFAULT_CAPABILITIES = Object.freeze(
   Object.values(CAPABILITIES).filter(
-    (capability) => capability !== CAPABILITIES.FINALIZE,
+    (capability) =>
+      ![
+        CAPABILITIES.FINALIZE,
+        CAPABILITIES.CAPTURE_SERIES,
+        CAPABILITIES.DOWNLOAD_STATUS,
+      ].includes(capability),
   ),
 );
 
