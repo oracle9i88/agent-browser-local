@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.15`（Public Preview）。
+当前版本：`v0.3.0-beta.16`（Public Preview）。喜马拉雅 Studio 上传二阶段表单已验收，见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
