@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.0-beta.16 — 2026-09-06
+
+- 修复 macOS 下无法粘贴/复制的真实缺陷：主进程从未调用 `Menu.setApplicationMenu`，导致没有 Edit 菜单，Cmd+C/V/X/A 等编辑快捷键全部失效（Electron 经典坑）。现注册 App/Edit/Window 标准菜单（role 实现），并为不信任网页的 webContents 增加右键上下文菜单（可编辑框给撤销/剪切/复制/粘贴/全选，纯选中文本给复制）。用户已在打包应用内实测 Cmd+V 粘贴成功。
+
 ## v0.3.0-beta.15 — 2026-09-06
 
 - 修复 `browser.fill` 对受控输入框（React 类）只追加、不替换的真实缺陷：合成 Cmd+A + Backspace 清空在这类组件上不可靠，现改为聚焦后先经 CDP `DOM.resolveNode` + `Runtime.callFunctionOn` 走原生 value setter 清空并派发 `input`/`change` 事件（contenteditable 走 `textContent` + `InputEvent`），再逐字输入，受控组件的 onChange 能正确观测到新值。

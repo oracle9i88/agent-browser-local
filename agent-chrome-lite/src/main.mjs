@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   session,
   WebContentsView,
 } from "electron";
@@ -171,10 +172,72 @@ function resetExternalAuthState() {
   lastAutoOpenedExternalAuth = null;
 }
 
+function installApplicationMenu() {
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: "about" },
+          { type: "separator" },
+          { role: "hide" },
+          { role: "hideOthers" },
+          { role: "unhide" },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "pasteAndMatchStyle" },
+          { role: "delete" },
+          { role: "selectAll" },
+        ],
+      },
+      {
+        label: "Window",
+        submenu: [
+          { role: "minimize" },
+          { role: "zoom" },
+          { type: "separator" },
+          { role: "close" },
+        ],
+      },
+    ]),
+  );
+}
+
 function hardenUntrustedWebContents(webContents) {
   webContents.setUserAgent(browserUserAgent);
   webContents.on("will-navigate", (event, url) => {
     handleExternalAuthNavigation(url, { event });
+  });
+  webContents.on("context-menu", (_event, params) => {
+    const items = [];
+    if (params.isEditable) {
+      items.push(
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { type: "separator" },
+        { role: "selectAll" },
+      );
+    } else if (params.selectionText) {
+      items.push({ role: "copy" });
+    }
+    if (items.length > 0) {
+      Menu.buildFromTemplate(items).popup();
+    }
   });
   egressPolicy.register(webContents);
   webContents.setWindowOpenHandler(({ url }) => {
@@ -498,6 +561,7 @@ if (!singleInstance) {
           `Migration recovery failed: ${String(error?.message || error).slice(0, 200)}`,
         );
       }
+      installApplicationMenu();
       installIpc();
       await createWindow(config);
 
