@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.16`（Public Preview）。喜马拉雅 Studio 上传二阶段表单已验收，见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前版本：`v0.3.0-beta.17`（Public Preview）。喜马拉雅 Studio 上传二阶段表单已验收，见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -26,7 +26,7 @@
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
 - 创删、提交和发布默认由 daemon 拦截；只有本地权限表明确授予 `browser.finalize.ref` 的 principal 才能代为执行，并逐次写入审计。删除、支付、登录、验证码、Suno Create 仍不可委托。
-- Suno 的额度语义按入口严格区分：Premier 普通歌曲页下载每月 60 次；已进入 Studio 后的导出不限次数；歌曲页 `Open in Studio → Multi-track` 是创建多轨工程并显示 50 credits，`Get MIDI` 也可能消耗 credits。后二者仍在扣费前 handoff，不能因按钮含有 Multi-track/MIDI 就获得下载许可。
+- Suno 的额度语义按页面实际信息区分：Premier 普通歌曲页下载每月 60 次；已进入 Studio 后的导出不限次数；歌曲页 `Open in Studio → Multi-track` 若明确显示 50 credits，则按本地 `browser.credits.suno` 权限执行。Studio 的 `Get Stems / MIDI` 不再凭按钮名称额外强制 handoff；只有页面节点明确标出 credits 时，才进入同一额度权限规则。
 - 人机验证、CAPTCHA、“我不是机器人”和类似安全检查永远由用户本人完成；Agent 只负责识别、暂停和提示，不会自动勾选或尝试绕过。
 - 单队列、人类节奏执行和 JSONL 审计。
 - MCP stdio 薄适配器；NovaGe/NovaDe 可直接调用 HTTP。
@@ -236,7 +236,7 @@ npm run agent-permissions -- --revoke-suno-studio codex
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.15`（验收通过后创建）
+- Git tag：`v0.3.0-beta.17`（验收通过后创建）
 - GitHub：`codex/scroll-beta12` 保存候选源码；tag 在打包和验收通过后固定审计提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。

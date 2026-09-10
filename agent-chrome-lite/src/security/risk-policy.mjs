@@ -22,8 +22,10 @@ const creditActionWords = [
 ];
 
 // 只有真正位于 Suno Studio 内的落盘入口才享受不限额下载规则。
-// 普通歌曲页的 Download/MP3/WAV 计入月度额度；Get MIDI 可能消耗
-// credits，二者都不能借 Studio 的一次性下载许可放行。
+// 普通歌曲页的 Download/MP3/WAV 计入月度额度，不能借 Studio 的
+// 一次性下载许可放行。Get Stems / MIDI 是 Studio 编辑工作流入口，
+// 不在这里额外设置 handoff；若页面明确标出 credits，后面的通用
+// creditQuotedWords 规则仍会按本地 browser.credits.suno 权限判定。
 const studioDownloadWords = [
   /^multi-?track$/i,
 ];
@@ -33,8 +35,6 @@ const studioDownloadWords = [
 // and did not start a download in packaged-app validation. Keep it manual-only
 // instead of claiming unreliable automation support.
 const studioManualDownloadWords = [/^download\s*\.?\s*wav$/i];
-
-const getMidiWords = [/get\s+(?:stems?\s*\/\s*)?midi/i];
 
 function isSunoStudioUrl(url) {
   try {
@@ -187,13 +187,6 @@ export function classifyAction({ action, node, url }) {
       code: "legal_consent_required",
       reason: "协议、条款或授权确认需要用户本人完成，或由本地权限表明确授予代发布权限的 Agent 执行。",
       delegableCapability: "browser.finalize.ref",
-    };
-  }
-  if (matchesAny(text, getMidiWords)) {
-    return {
-      blocked: true,
-      code: "credit_action_requires_handoff",
-      reason: "Get MIDI 可能消耗 credits，必须交给用户本人确认。",
     };
   }
   if (isSunoStudioUrl(url) && matchesAny(textOf(node), studioManualDownloadWords)) {

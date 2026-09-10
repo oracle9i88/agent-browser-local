@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.0-beta.17 — 2026-09-10
+
+- 移除未经用户要求加入的 `Get Stems / MIDI` 专用人工接管门禁：Studio 中未标价的入口允许已授权 Agent 正常点击，不再仅凭按钮名称假定消耗 credits。
+- 保留真实额度防线：若 Snapshot 节点明确显示 `N credits`，仍由 daemon 按本地 `browser.credits.suno` capability 判定；Agent 不能自报权限。
+- 本次升级只替换应用程序构建产物，不迁移、不删除持久化 Agent Space/Profile 与 Suno 登录态。
+
 ## v0.3.0-beta.16 — 2026-09-06
 
 - 修复 macOS 下无法粘贴/复制的真实缺陷：主进程从未调用 `Menu.setApplicationMenu`，导致没有 Edit 菜单，Cmd+C/V/X/A 等编辑快捷键全部失效（Electron 经典坑）。现注册 App/Edit/Window 标准菜单（role 实现），并为不信任网页的 webContents 增加右键上下文菜单（可编辑框给撤销/剪切/复制/粘贴/全选，纯选中文本给复制）。用户已在打包应用内实测 Cmd+V 粘贴成功。

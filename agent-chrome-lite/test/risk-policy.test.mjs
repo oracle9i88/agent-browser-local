@@ -84,13 +84,28 @@ test("Suno generation actions are delegable via the credits capability", () => {
   assert.equal(risk.delegableCapability, CAPABILITIES.CREDITS_SUNO);
 });
 
-test("Get Stems/MIDI remains a credit handoff", () => {
+test("Get Stems/MIDI is not assigned a synthetic handoff gate", () => {
   const risk = classifyAction({
     action: "click",
     node: { tag: "button", role: "button", name: "Get Stems / MIDI Pro" },
+    url: "https://suno.com/studio/song/abc",
+  });
+  assert.deepEqual(risk, { blocked: false });
+});
+
+test("Get Stems/MIDI with an explicit credit quote uses delegated credits", () => {
+  const risk = classifyAction({
+    action: "click",
+    node: {
+      tag: "button",
+      role: "button",
+      name: "Get Stems / MIDI Pro 50 credits",
+    },
+    url: "https://suno.com/studio/song/abc",
   });
   assert.equal(risk.blocked, true);
   assert.equal(risk.code, "credit_action_requires_handoff");
+  assert.equal(risk.delegableCapability, CAPABILITIES.CREDITS_SUNO);
 });
 
 test("Studio Multitrack downloads use the finalize gate", () => {
