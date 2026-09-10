@@ -10,6 +10,7 @@ import {
 } from "./constants.mjs";
 import {
   contributionTargetsFor,
+  downloadSourcesFor,
   hardenLegacyContributionTargets,
 } from "./security/platform-registry.mjs";
 
@@ -65,6 +66,9 @@ export async function createConfig(configPath = defaultConfigPath()) {
     security: {
       uploadRoots: defaultUploadRoots(),
       contributionTargets: contributionTargetsFor(),
+      downloadSources: downloadSourcesFor(),
+      downloadRoots: defaultUploadRoots(),
+      downloadMinIntervalMs: 1200,
       minActionDelayMs: 850,
       maxActionDelayMs: 1650,
       maxSnapshotControls: 180,
@@ -141,9 +145,29 @@ export async function loadConfig(configPath = defaultConfigPath()) {
       config.security.contributionTargets,
     );
   }
+  // 受控下载是后加能力：旧配置缺少这三项时按注册表默认值补齐，
+  // 不覆盖本机维护者已有的显式配置。download 能力本身仍需逐 principal
+  // 授予（见 scripts/agent-permissions.mjs），补齐来源清单不等于开放下载。
+  let upgradedDownloadPolicy = false;
+  if (config.security && !Array.isArray(config.security.downloadSources)) {
+    config.security.downloadSources = downloadSourcesFor();
+    upgradedDownloadPolicy = true;
+  }
+  if (config.security && !Array.isArray(config.security.downloadRoots)) {
+    config.security.downloadRoots = defaultUploadRoots();
+    upgradedDownloadPolicy = true;
+  }
+  if (
+    config.security &&
+    !Number.isFinite(Number(config.security.downloadMinIntervalMs))
+  ) {
+    config.security.downloadMinIntervalMs = 1200;
+    upgradedDownloadPolicy = true;
+  }
   validateConfig(config);
   if (
     upgradedCapabilities ||
+    upgradedDownloadPolicy ||
     JSON.stringify(config.security.contributionTargets) !== beforeTargets
   ) {
     const tempPath = `${configPath}.${process.pid}.security-upgrade.tmp`;
@@ -165,6 +189,31 @@ function validateConfig(config) {
   }
   if (!Array.isArray(config.security?.contributionTargets)) {
     throw new Error("security.contributionTargets must be a local allowlist");
+  }
+  if (!Array.isArray(config.security?.downloadSources)) {
+    throw new Error("security.downloadSources must be a local allowlist");
+  }
+  for (const source of config.security.downloadSources) {
+    let origin;
+    try {
+      origin = new URL(source.origin).origin;
+    } catch {
+      throw new Error("Invalid download source origin");
+    }
+    if (origin !== source.origin || new URL(source.origin).protocol !== "https:") {
+      throw new Error("Download sources must be exact https origins");
+    }
+  }
+  if (
+    !Array.isArray(config.security?.downloadRoots) ||
+    config.security.downloadRoots.some(
+      (root) => typeof root !== "string" || !path.isAbsolute(root),
+    )
+  ) {
+    throw new Error("security.downloadRoots must be absolute paths");
+  }
+  if (Number(config.security?.downloadMinIntervalMs) < 1000) {
+    throw new Error("security.downloadMinIntervalMs must be at least 1000");
   }
   for (const target of config.security.contributionTargets) {
     let origin;
@@ -286,3 +335,74 @@ export async function assertAllowedUploadPath(filePath, roots) {
 }
 
 export { hashToken };
+
+// 受控下载落盘路径校验：与上传沿用同一思路，但目标尚不存在，
+// 所以校验父目录的 realpath 是否落在 downloadRoots 内，再拼接
+// basename 得到最终路径。目标已存在时默认拒绝（绝不产生 " (1)"
+// 重复副本）；调用方显式 overwrite 且目标是普通文件时才允许覆盖。
+export async function assertAllowedDownloadPath(
+  filePath,
+  roots,
+  { overwrite = false, existsSync } = {},
+) {
+  if (typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    const error = new Error("Download paths must be absolute");
+    error.code = "invalid_download_path";
+    throw error;
+  }
+  const parent = path.dirname(filePath);
+  const filename = path.basename(filePath);
+  if (!filename || filename === "." || filename === "..") {
+    const error = new Error("Download path must name a file");
+    error.code = "invalid_download_path";
+    throw error;
+  }
+  let parentReal;
+  try {
+    parentReal = await realpath(parent);
+  } catch {
+    const error = new Error("Download directory does not exist");
+    error.code = "invalid_download_path";
+    throw error;
+  }
+  const allowedRoots = [];
+  for (const root of roots || []) {
+    try {
+      allowedRoots.push(await realpath(root));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const allowed = allowedRoots.some((root) => {
+    const relative = path.relative(root, parentReal);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  });
+  if (!allowed) {
+    const error = new Error("Download path is outside configured download roots");
+    error.code = "download_path_outside_roots";
+    throw error;
+  }
+  const finalPath = path.join(parentReal, filename);
+  const exists = existsSync
+    ? existsSync(finalPath)
+    : await stat(finalPath).then(
+        () => true,
+        () => false,
+      );
+  if (exists) {
+    if (!overwrite) {
+      const error = new Error(
+        "Download target already exists; pass overwrite to replace it",
+      );
+      error.code = "download_target_exists";
+      throw error;
+    }
+    const info = await stat(finalPath);
+    if (!info.isFile()) {
+      const error = new Error("Download target is not a regular file");
+      error.code = "invalid_download_path";
+      throw error;
+    }
+  }
+  return { filePath: finalPath, filename, overwrite: Boolean(exists) };
+}

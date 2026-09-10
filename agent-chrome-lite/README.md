@@ -179,6 +179,26 @@ osascript -e 'tell application "Agent Browser Local" to activate' \
 - Create 表单：生成后 Styles 自动清空、Exclude styles 和标题保留；换提示词必须先 `Clear all form inputs`（有 Confirm 确认框）再填，否则标题会追加串联。视觉填写（fillVisual）60 秒截图过期，截图和填写要连着做。
 - 多轨 ZIP 命名冲突时自动加 (2)/(3) 后缀；监视脚本误判会重复下载同歌，完成后人工核对去重。
 
+## 受控下载（browser.download）
+
+供 Agent 对本地 allowlist 内的域名逐条下载文件（首批登记：`musopen.org` / `dl.musopen.org` 的公版古典音乐）。下载在浏览器会话内发起（带该域登录态/Cookie），daemon 通过 `will-download` + `setSavePath` 固定落盘路径，可编程回报 进行中/已完成/失败(含原因)，中断时自动原地续传（≤3 次），重试同一目标需显式 `overwrite`，不产生 ` (1)` 重复副本。
+
+边界与既有承诺一致：目标 origin 必须登记在 `security.downloadSources`，落盘必须落在 `security.downloadRoots`（Python 适配器再约束在各自 workspace 内）；单队列、人类节奏（受控下载最小间隔默认 1200ms，下限 1000ms）；全程 JSONL 审计；遇 CAPTCHA/403/下载未启动记为失败并应走 handoff 交给用户，不做任何人机验证绕过。该能力不在默认权限内，由本机维护者逐 principal 授予：
+
+```bash
+npm run agent-permissions -- --grant-download codex
+```
+
+设计细节见 [docs/controlled-download.md](docs/controlled-download.md)。
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $ABL_TOKEN" \
+  -H 'content-type: application/json' \
+  --data '{"url":"https://dl.musopen.org/…/file.mp3","savePath":"/abs/path/in/download-roots/file.mp3"}' \
+  http://127.0.0.1:3767/v1/actions/download
+```
+
 ## 迁移到新机器
 
 1. `git clone` 本仓库 → `npm ci` → `npm start`（或 `npm run package:mac` 后双击 dist 里的 .app）。

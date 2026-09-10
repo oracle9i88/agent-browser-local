@@ -141,7 +141,58 @@ const PLATFORM_REGISTRY = Object.freeze({
 export const DEFAULT_PLATFORM_IDS = Object.freeze(
   Object.keys(PLATFORM_REGISTRY).filter((platformId) => platformId !== "suno"),
 );
-export { HUMAN_ONLY_ACTIONS, PLATFORM_BACKLOG, PLATFORM_REGISTRY };
+
+// 受控下载来源是与投稿目标完全独立的一套登记：登记只代表 daemon 允许
+// browser.download 向这些 origin 发起会话内逐条下载，不代表开放任何
+// 页面导航、快照或抓取能力。新来源启用前必须确认其内容许可允许本机保存
+// （例如 musopen 的公版/CC-PD 录音与乐谱）。
+const DOWNLOAD_REGISTRY = Object.freeze({
+  musopen: Object.freeze({
+    label: "Musopen（公版古典音乐）",
+    evidence: "https://musopen.org/music/",
+    downloadSources: Object.freeze([
+      Object.freeze({ origin: "https://musopen.org" }),
+      Object.freeze({ origin: "https://dl.musopen.org" }),
+    ]),
+  }),
+});
+
+export const DEFAULT_DOWNLOAD_SOURCE_IDS = Object.freeze(
+  Object.keys(DOWNLOAD_REGISTRY),
+);
+export { HUMAN_ONLY_ACTIONS, PLATFORM_BACKLOG, PLATFORM_REGISTRY, DOWNLOAD_REGISTRY };
+
+function cloneDownloadSource(source) {
+  return { ...source };
+}
+
+export function downloadSourcesFor(sourceIds = DEFAULT_DOWNLOAD_SOURCE_IDS) {
+  const sources = [];
+  for (const sourceId of sourceIds) {
+    const entry = DOWNLOAD_REGISTRY[sourceId];
+    if (!entry) {
+      throw new Error(`Unknown download source: ${sourceId}`);
+    }
+    for (const source of entry.downloadSources) {
+      sources.push(cloneDownloadSource({ source: sourceId, ...source }));
+    }
+  }
+  return sources;
+}
+
+export function mergeDownloadSources(existingSources, sourceIds) {
+  const authoritative = downloadSourcesFor(sourceIds);
+  const authoritativeOrigins = new Set(authoritative.map((s) => s.origin));
+  const merged = (existingSources || [])
+    .filter((s) => !authoritativeOrigins.has(s.origin))
+    .map(cloneDownloadSource);
+  return [...merged, ...authoritative];
+}
+
+export function removeDownloadSources(existingSources, sourceIds) {
+  const origins = new Set(downloadSourcesFor(sourceIds).map((s) => s.origin));
+  return (existingSources || []).filter((s) => !origins.has(s.origin));
+}
 
 function cloneContributionTarget(target) {
   return {

@@ -26,6 +26,8 @@ _ACTIONS = {
     "upload": ("POST", "/v1/actions/upload"),
     "screenshot": ("POST", "/v1/screenshot"),
     "visual_click": ("POST", "/v1/actions/visual-click"),
+    "download": ("POST", "/v1/actions/download"),
+    "download_status": ("POST", "/v1/actions/download-status"),
     "handoff": ("POST", "/v1/handoff"),
 }
 
@@ -76,6 +78,21 @@ def _workspace_file(workspace: Path, value: str) -> str:
     return str(candidate)
 
 
+def _workspace_destination(workspace: Path, value: str) -> str:
+    root = Path(workspace).resolve()
+    candidate = Path(value)
+    candidate = (root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError("Nova Agent downloads must land inside its workspace") from exc
+    if candidate.name in {"", ".", ".."}:
+        raise RuntimeError("Download destination must name a file")
+    if not candidate.parent.is_dir():
+        raise RuntimeError(f"Download directory does not exist: {candidate.parent.name}")
+    return str(candidate)
+
+
 def _payload(action: str, workspace: Path, values: dict) -> dict:
     if action == "navigate":
         return {"url": values.get("url", "")}
@@ -97,6 +114,18 @@ def _payload(action: str, workspace: Path, values: dict) -> dict:
         }
     if action == "handoff":
         return {"reason": values.get("reason", "")}
+    if action == "download":
+        return {
+            "url": values.get("url", ""),
+            "savePath": _workspace_destination(Path(workspace), values.get("save_path", "")),
+            "overwrite": bool(values.get("overwrite", False)),
+        }
+    if action == "download_status":
+        payload = {"includeCompleted": bool(values.get("include_completed", False))}
+        download_id = values.get("download_id")
+        if download_id:
+            payload["downloadId"] = download_id
+        return payload
     return {}
 
 

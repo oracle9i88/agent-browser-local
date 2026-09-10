@@ -1,8 +1,9 @@
 import path from "node:path";
 
-import { assertAllowedUploadPath } from "../config.mjs";
+import { assertAllowedDownloadPath, assertAllowedUploadPath } from "../config.mjs";
 import { CAPABILITIES } from "../constants.mjs";
 import { assertContributionUrl } from "../security/contribution-policy.mjs";
+import { isPrivateNetworkHostname } from "../security/network-egress.mjs";
 import {
   classifyAction,
   classifySnapshotSurface,
@@ -32,6 +33,7 @@ export class BrowserDaemon {
     this.config = config;
     this.executor = executor;
     this.audit = audit;
+    this.lastControlledDownloadAt = 0;
     this.controller.on?.("download", (entry) => {
       void this.audit.record({
         ...entry,
@@ -280,6 +282,90 @@ export class BrowserDaemon {
             url: safeUrl(this.controller.status().url),
           });
           return result;
+        });
+      }
+
+      case "browser.download": {
+        this.requireCapability(identity, CAPABILITIES.DOWNLOAD_FILE);
+        this.requireNoHandoff();
+        let parsed;
+        try {
+          parsed = new URL(String(params.url || ""));
+        } catch {
+          throw new DaemonError(400, "invalid_download_url", "Download URL is invalid");
+        }
+        if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+          throw new DaemonError(
+            400,
+            "invalid_download_url",
+            "Controlled downloads require a clean https URL",
+          );
+        }
+        if (isPrivateNetworkHostname(parsed.hostname)) {
+          throw new DaemonError(
+            403,
+            "download_source_not_allowed",
+            "Controlled downloads never target loopback or private networks",
+          );
+        }
+        const allowedOrigins = new Set(
+          (this.config.security.downloadSources || []).map((s) => s.origin),
+        );
+        if (!allowedOrigins.has(parsed.origin)) {
+          throw new DaemonError(
+            403,
+            "download_source_not_allowed",
+            "URL origin is not in the daemon's local download source allowlist",
+          );
+        }
+        const checked = await assertAllowedDownloadPath(
+          String(params.savePath || ""),
+          this.config.security.downloadRoots,
+          { overwrite: Boolean(params.overwrite) },
+        );
+        // 单队列之外再强制逐条最小间隔（默认 1200ms，配置下限 1000ms），
+        // 保证人类节奏，不允许贴脸连发。
+        const minInterval = Math.max(
+          1000,
+          Number(this.config.security.downloadMinIntervalMs) || 1200,
+        );
+        const elapsed = Date.now() - this.lastControlledDownloadAt;
+        if (this.lastControlledDownloadAt && elapsed < minInterval) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, minInterval - elapsed),
+          );
+        }
+        this.lastControlledDownloadAt = Date.now();
+        return this.executor.run(async () => {
+          const result = await this.controller.controlledDownload({
+            url: parsed.href,
+            savePath: checked.filePath,
+            filename: checked.filename,
+            principal: identity.principal,
+          });
+          await this.audit.record({
+            event: "browser.download",
+            principal: identity.principal,
+            downloadId: result.downloadId,
+            url: safeUrl(parsed.href),
+            filename: checked.filename,
+            overwrite: checked.overwrite,
+            started: result.started,
+          });
+          if (!result.started) {
+            throw new DaemonError(
+              502,
+              "download_not_started",
+              "The browser session produced no download; the server may have refused the request. Hand off to the user if a human check is shown.",
+              { downloadId: result.downloadId },
+            );
+          }
+          return {
+            downloadId: result.downloadId,
+            state: result.state,
+            savePath: result.savePath,
+            filename: result.filename,
+          };
         });
       }
 

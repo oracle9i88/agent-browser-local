@@ -16,6 +16,8 @@ function usage() {
     "  npm run agent-permissions -- --revoke-suno-studio <principal>",
     "  npm run agent-permissions -- --grant-suno-credits <principal>",
     "  npm run agent-permissions -- --revoke-suno-credits <principal>",
+    "  npm run agent-permissions -- --grant-download <principal>",
+    "  npm run agent-permissions -- --revoke-download <principal>",
   ].join("\n");
 }
 
@@ -32,6 +34,15 @@ export function updateSunoStudioCapabilities(config, principal, enabled) {
     config,
     principal,
     [CAPABILITIES.CAPTURE_SERIES, CAPABILITIES.DOWNLOAD_STATUS],
+    enabled,
+  );
+}
+
+export function updateDownloadCapabilities(config, principal, enabled) {
+  return updateCapabilities(
+    config,
+    principal,
+    [CAPABILITIES.DOWNLOAD_FILE, CAPABILITIES.DOWNLOAD_STATUS],
     enabled,
   );
 }
@@ -66,10 +77,14 @@ async function main() {
         agent.capabilities?.includes(CAPABILITIES.CAPTURE_SERIES) &&
         agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
       const sunoCredits = agent.capabilities?.includes(CAPABILITIES.CREDITS_SUNO);
+      const download =
+        agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_FILE) &&
+        agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
       process.stdout.write(
         `${agent.principal}\tfinalize=${finalize ? "on" : "off"}` +
         `\tsuno-studio=${sunoStudio ? "on" : "off"}` +
-        `\tsuno-credits=${sunoCredits ? "on" : "off"}\n`,
+        `\tsuno-credits=${sunoCredits ? "on" : "off"}` +
+        `\tdownload=${download ? "on" : "off"}\n`,
       );
     }
     return;
@@ -82,6 +97,8 @@ async function main() {
     ["--revoke-suno-studio", { kind: "suno-studio", enabled: false }],
     ["--grant-suno-credits", { kind: "suno-credits", enabled: true }],
     ["--revoke-suno-credits", { kind: "suno-credits", enabled: false }],
+    ["--grant-download", { kind: "download", enabled: true }],
+    ["--revoke-download", { kind: "download", enabled: false }],
   ]);
   const action = actions.get(command);
   if (!action || !principal) {
@@ -92,6 +109,8 @@ async function main() {
     updateFinalizeCapability(config, principal, action.enabled);
   } else if (action.kind === "suno-credits") {
     updateSunoCreditsCapability(config, principal, action.enabled);
+  } else if (action.kind === "download") {
+    updateDownloadCapabilities(config, principal, action.enabled);
   } else {
     updateSunoStudioCapabilities(config, principal, action.enabled);
   }

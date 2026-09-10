@@ -267,6 +267,26 @@ server.registerTool(
 );
 
 server.registerTool(
+  "browser_download",
+  {
+    description:
+      "Download one allowlisted https file inside the browser session to a local path within the configured download roots. Single-file, human-paced, audited; never produces duplicate ' (1)' copies. Poll browser_download_status for the terminal state; on failure hand off to the user instead of retrying blindly. Requires the locally granted browser.download.file capability.",
+    inputSchema: {
+      url: z.string().url().describe("Direct https file URL from an allowlisted origin (e.g. dl.musopen.org)."),
+      savePath: z.string().min(1).describe("Absolute destination path inside the configured download roots."),
+      overwrite: z.boolean().default(false).describe("Replace an existing file at savePath (required for retrying the same path)."),
+    },
+  },
+  async ({ url, savePath, overwrite }) =>
+    textResult(
+      await api("/v1/actions/download", {
+        method: "POST",
+        body: JSON.stringify({ url, savePath, overwrite }),
+      }),
+    ),
+);
+
+server.registerTool(
   "browser_download_status",
   {
     description:

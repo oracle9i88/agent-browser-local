@@ -19,6 +19,8 @@ import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
 
 const DEFAULT_DOWNLOADS_DIR = path.join(os.homedir(), "Downloads");
 const DOWNLOAD_PERMIT_TTL_MS = 15_000;
+const CONTROLLED_DOWNLOAD_PENDING_TTL_MS = 30_000;
+const CONTROLLED_DOWNLOAD_MAX_RESUME_ATTEMPTS = 3;
 
 export function isSunoStudioUrl(value) {
   try {
@@ -173,12 +175,16 @@ export class BrowserController extends EventEmitter {
   constructor(
     webContents,
     config,
-    { allowFileUrls = false, capturesDir, downloadsDir } = {},
+    { allowFileUrls = false, capturesDir, downloadsDir, downloadStartTimeoutMs } = {},
   ) {
     super();
     this.webContents = webContents;
     this.config = config;
     this.allowFileUrls = allowFileUrls;
+    this.downloadStartTimeoutMs =
+      Number.isFinite(Number(downloadStartTimeoutMs)) && downloadStartTimeoutMs > 0
+        ? Number(downloadStartTimeoutMs)
+        : 15_000;
     this.pageHealth = new PageHealthState();
     this.cdp = new CdpSession(webContents, {
       onFault: (error) => {
@@ -201,6 +207,8 @@ export class BrowserController extends EventEmitter {
     this.downloadCounter = 0;
     this.sunoDownloadPermit = null;
     this.sunoDownloadPermitTimer = null;
+    this.controlledDownloadPending = new Map(); // normalizedUrl → pending
+    this.lastControlledDownloadAt = 0;
 
     const reconcileContributionScope = (url) => {
       const transition = contributionScopeTransition(
@@ -324,7 +332,150 @@ export class BrowserController extends EventEmitter {
     return permit;
   }
 
+  consumeControlledDownloadPending(itemUrl) {
+    let normalized;
+    try {
+      const parsed = new URL(itemUrl);
+      normalized = `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return null;
+    }
+    const pending = this.controlledDownloadPending.get(normalized);
+    if (!pending) return null;
+    this.controlledDownloadPending.delete(normalized);
+    if (pending.expiresAt < Date.now()) return null;
+    return pending;
+  }
+
+  async controlledDownload({ url, savePath, filename, principal }) {
+    const parsed = new URL(url);
+    const normalized = `${parsed.origin}${parsed.pathname}`;
+    if (this.controlledDownloadPending.has(normalized)) {
+      const error = new Error("A controlled download for this URL is already armed");
+      error.code = "download_already_pending";
+      throw error;
+    }
+    this.downloadCounter += 1;
+    const downloadId = `dl_${this.downloadCounter}_${randomUUID().slice(0, 8)}`;
+    const record = {
+      downloadId,
+      kind: "controlled",
+      filename,
+      savePath,
+      url: normalized,
+      state: "pending",
+      receivedBytes: 0,
+      totalBytes: -1,
+      startedAt: Date.now(),
+      finishedAt: null,
+      error: null,
+      resumeAttempts: 0,
+      principal: String(principal || ""),
+    };
+    this.downloads.set(downloadId, record);
+    let pendingTimer = null;
+    const started = new Promise((resolve) => {
+      pendingTimer = setTimeout(() => {
+        this.controlledDownloadPending.delete(normalized);
+        record.state = "failed";
+        record.error = "download_not_started";
+        record.finishedAt = Date.now();
+        this.emit("download", {
+          event: "browser.download.failed",
+          principal: record.principal,
+          downloadId,
+          filename,
+          error: "download_not_started",
+        });
+        resolve(false);
+      }, this.downloadStartTimeoutMs);
+      pendingTimer.unref?.();
+      this.controlledDownloadPending.set(normalized, {
+        downloadId,
+        expiresAt: Date.now() + CONTROLLED_DOWNLOAD_PENDING_TTL_MS,
+        resolveStarted: resolve,
+      });
+    });
+    const session = this.webContents.session;
+    if (!session || typeof session.downloadURL !== "function") {
+      this.controlledDownloadPending.delete(normalized);
+      clearTimeout(pendingTimer);
+      const error = new Error("Browser session does not support programmatic downloads");
+      error.code = "download_unsupported";
+      throw error;
+    }
+    // downloadURL 只发起请求，不导航页面；服务器若返回 403/HTML，
+    // will-download 不会触发，由上面的 15 秒待办超时记为失败。
+    session.downloadURL(url);
+    const ok = await started;
+    clearTimeout(pendingTimer);
+    return { ...record, started: ok };
+  }
+
+  trackControlledDownloadItem(item, pending) {
+    const record = this.downloads.get(pending.downloadId);
+    if (!record) return;
+    record.state = "in_progress";
+    item.setSavePath(record.savePath);
+    this.emit("download", {
+      event: "browser.download.started",
+      principal: record.principal,
+      downloadId: record.downloadId,
+      filename: record.filename,
+    });
+    item.on("updated", (_event, state) => {
+      const current = this.downloads.get(record.downloadId);
+      if (!current || current.finishedAt) return;
+      current.receivedBytes = item.getReceivedBytes();
+      current.totalBytes = item.getTotalBytes();
+      // 服务器单连接中断时 Chromium 报 interrupted；可续传就原地续，
+      // 不产生第二个 downloadItem，也不会出现重复副本文件。
+      if (
+        state === "interrupted" &&
+        typeof item.canResume === "function" &&
+        item.canResume() &&
+        current.resumeAttempts < CONTROLLED_DOWNLOAD_MAX_RESUME_ATTEMPTS
+      ) {
+        current.resumeAttempts += 1;
+        item.resume();
+        return;
+      }
+      current.state = state;
+    });
+    item.once("done", (_event, state) => {
+      const current = this.downloads.get(record.downloadId);
+      if (!current || current.finishedAt) return;
+      current.state = state === "completed" ? "completed" : "failed";
+      current.receivedBytes = item.getReceivedBytes();
+      current.totalBytes = item.getTotalBytes();
+      current.finishedAt = Date.now();
+      current.error = state === "completed" ? null : state;
+      this.emit("download", {
+        event: state === "completed"
+          ? "browser.download.completed"
+          : "browser.download.failed",
+        principal: current.principal,
+        downloadId: current.downloadId,
+        filename: current.filename,
+        receivedBytes: current.receivedBytes,
+        totalBytes: current.totalBytes,
+        error: current.error,
+        resumeAttempts: current.resumeAttempts,
+      });
+    });
+  }
+
   async handleWillDownload(item, sourceContents) {
+    // 受控下载待办优先：Agent 通过 browser.download 发起的逐条下载。
+    // item.getURL() 是实际响应地址（重定向后），按 origin+pathname 匹配。
+    const controlled = typeof item.getURL === "function"
+      ? this.consumeControlledDownloadPending(item.getURL())
+      : null;
+    if (controlled) {
+      this.trackControlledDownloadItem(item, controlled);
+      controlled.resolveStarted?.(true);
+      return { handled: true, downloadId: controlled.downloadId };
+    }
     const permit = this.consumeSunoDownloadPermit(sourceContents);
     // No audited, one-shot Suno permit: leave Electron's normal human download
     // handling untouched. In particular, never silently choose a save path.

@@ -9,6 +9,7 @@ export const CAPABILITIES = Object.freeze({
   SCROLL: "browser.scroll",
   CAPTURE_SERIES: "browser.capture.series",
   DOWNLOAD_STATUS: "browser.download.status",
+  DOWNLOAD_FILE: "browser.download.file",
   CLICK: "browser.click.ref",
   CLICK_VISUAL: "browser.click.visual",
   FILL: "browser.fill.ref",
@@ -29,6 +30,7 @@ export const DEFAULT_CAPABILITIES = Object.freeze(
         CAPABILITIES.CREDITS_SUNO,
         CAPABILITIES.CAPTURE_SERIES,
         CAPABILITIES.DOWNLOAD_STATUS,
+        CAPABILITIES.DOWNLOAD_FILE,
       ].includes(capability),
   ),
 );
