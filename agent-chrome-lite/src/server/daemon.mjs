@@ -107,6 +107,24 @@ export class BrowserDaemon {
     return true;
   }
 
+  async reconcileNavigateHandoff(identity, targetUrl) {
+    const handoff = this.controller.status().handoff;
+    if (!handoff?.required) return false;
+    if (handoff?.detail?.code !== "outside_contribution_scope") return false;
+    // The target URL has already passed requireContributionPage by the caller,
+    // so navigating back into contribution scope is the intended recovery path
+    // for an out-of-scope handoff (controller.navigate clears handoff itself).
+    this.controller.clearHandoff();
+    await this.audit.record({
+      event: "handoff.auto_resumed",
+      principal: identity.principal,
+      code: handoff.detail.code,
+      via: "browser.navigate",
+      url: safeUrl(targetUrl),
+    });
+    return true;
+  }
+
   async blocked(identity, risk, context) {
     const handoff = this.controller.setHandoff(risk.reason, {
       code: risk.code,
@@ -153,8 +171,10 @@ export class BrowserDaemon {
 
       case "browser.navigate": {
         this.requireCapability(identity, CAPABILITIES.NAVIGATE);
-        this.requireNoHandoff();
         this.requireContributionPage(params.url);
+        if (!(await this.reconcileNavigateHandoff(identity, params.url))) {
+          this.requireNoHandoff();
+        }
         return this.executor.run(async () => {
           const result = await this.controller.navigate(params.url);
           await this.audit.record({

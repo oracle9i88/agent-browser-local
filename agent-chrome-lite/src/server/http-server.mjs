@@ -8,7 +8,9 @@ import { DaemonError } from "./daemon.mjs";
 
 const HTTP_ROUTES = new Map([
   ["GET /v1/session", ["session.get", () => ({})]],
+  ["POST /v1/session", ["session.get", () => ({})]],
   ["GET /v1/status", ["browser.status", () => ({})]],
+  ["POST /v1/status", ["browser.status", () => ({})]],
   ["POST /v1/navigate", ["browser.navigate", (body) => body]],
   ["POST /v1/snapshot", ["browser.snapshot", () => ({})]],
   ["POST /v1/screenshot", ["browser.screenshot", () => ({})]],
