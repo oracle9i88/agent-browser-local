@@ -14,18 +14,22 @@ export const CAPABILITIES = Object.freeze({
   FILL: "browser.fill.ref",
   UPLOAD: "browser.upload.ref",
   FINALIZE: "browser.finalize.ref",
+  VERIFY: "browser.verify.ref",
   CREDITS_SUNO: "browser.credits.suno",
   HANDOFF: "browser.handoff",
 });
 
-// Finalize and Suno credits are deliberately opt-in per locally configured
+// Finalize, Verify and Suno credits are deliberately opt-in per locally configured
 // principal. They are not part of the capabilities created for a fresh
-// installation.
+// installation. Verify allows navigating whitelisted per-platform status
+// (post-list) pages for publish-outcome confirmation; it grants read navigation
+// only, never write actions.
 export const DEFAULT_CAPABILITIES = Object.freeze(
   Object.values(CAPABILITIES).filter(
     (capability) =>
       ![
         CAPABILITIES.FINALIZE,
+        CAPABILITIES.VERIFY,
         CAPABILITIES.CREDITS_SUNO,
         CAPABILITIES.CAPTURE_SERIES,
         CAPABILITIES.DOWNLOAD_STATUS,

@@ -12,6 +12,8 @@ function usage() {
     "  npm run agent-permissions -- --list",
     "  npm run agent-permissions -- --grant-finalize <principal>",
     "  npm run agent-permissions -- --revoke-finalize <principal>",
+    "  npm run agent-permissions -- --grant-verify <principal>",
+    "  npm run agent-permissions -- --revoke-verify <principal>",
     "  npm run agent-permissions -- --grant-suno-studio <principal>",
     "  npm run agent-permissions -- --revoke-suno-studio <principal>",
     "  npm run agent-permissions -- --grant-suno-credits <principal>",
@@ -21,6 +23,10 @@ function usage() {
 
 export function updateFinalizeCapability(config, principal, enabled) {
   return updateCapabilities(config, principal, [CAPABILITIES.FINALIZE], enabled);
+}
+
+export function updateVerifyCapability(config, principal, enabled) {
+  return updateCapabilities(config, principal, [CAPABILITIES.VERIFY], enabled);
 }
 
 export function updateSunoCreditsCapability(config, principal, enabled) {
@@ -62,12 +68,14 @@ async function main() {
   if (command === "--list" && !principal) {
     for (const agent of config.agents || []) {
       const finalize = agent.capabilities?.includes(CAPABILITIES.FINALIZE);
+      const verify = agent.capabilities?.includes(CAPABILITIES.VERIFY);
       const sunoStudio =
         agent.capabilities?.includes(CAPABILITIES.CAPTURE_SERIES) &&
         agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
       const sunoCredits = agent.capabilities?.includes(CAPABILITIES.CREDITS_SUNO);
       process.stdout.write(
         `${agent.principal}\tfinalize=${finalize ? "on" : "off"}` +
+        `\tverify=${verify ? "on" : "off"}` +
         `\tsuno-studio=${sunoStudio ? "on" : "off"}` +
         `\tsuno-credits=${sunoCredits ? "on" : "off"}\n`,
       );
@@ -78,6 +86,8 @@ async function main() {
   const actions = new Map([
     ["--grant-finalize", { kind: "finalize", enabled: true }],
     ["--revoke-finalize", { kind: "finalize", enabled: false }],
+    ["--grant-verify", { kind: "verify", enabled: true }],
+    ["--revoke-verify", { kind: "verify", enabled: false }],
     ["--grant-suno-studio", { kind: "suno-studio", enabled: true }],
     ["--revoke-suno-studio", { kind: "suno-studio", enabled: false }],
     ["--grant-suno-credits", { kind: "suno-credits", enabled: true }],
@@ -90,6 +100,8 @@ async function main() {
 
   if (action.kind === "finalize") {
     updateFinalizeCapability(config, principal, action.enabled);
+  } else if (action.kind === "verify") {
+    updateVerifyCapability(config, principal, action.enabled);
   } else if (action.kind === "suno-credits") {
     updateSunoCreditsCapability(config, principal, action.enabled);
   } else {

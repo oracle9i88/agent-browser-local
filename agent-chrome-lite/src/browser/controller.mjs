@@ -433,6 +433,28 @@ export class BrowserController extends EventEmitter {
     };
   }
 
+  /**
+   * 登录态探活：检查指定平台 requiredCookieNames 在对应域的 cookie store 中是否存在。
+   * 只返回布尔与缺失名单，绝不回传 cookie 值。
+   */
+  async authCheck(spec) {
+    const cookies = await this.webContents.session.cookies.get({});
+    const present = new Set(
+      cookies
+        .filter((cookie) =>
+          spec.domains.some((domain) => String(cookie.domain || "").includes(domain)),
+        )
+        .map((cookie) => cookie.name),
+    );
+    const missing = spec.requiredCookieNames.filter((name) => !present.has(name));
+    return {
+      checked: true,
+      loggedIn: missing.length === 0,
+      required: [...spec.requiredCookieNames],
+      missing,
+    };
+  }
+
   assertPageAvailable() {
     this.pageHealth.assertAvailable();
   }

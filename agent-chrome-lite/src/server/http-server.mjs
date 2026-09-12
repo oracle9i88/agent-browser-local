@@ -23,6 +23,7 @@ const HTTP_ROUTES = new Map([
   ["POST /v1/actions/visual-upload", ["browser.uploadVisual", (body) => body]],
   ["POST /v1/actions/capture-series", ["browser.captureSeries", (body) => body]],
   ["POST /v1/actions/download-status", ["browser.downloadStatus", (body) => body]],
+  ["POST /v1/auth/check", ["browser.authCheck", (body) => body]],
   ["POST /v1/handoff", ["browser.handoff", (body) => body]],
 ]);
 

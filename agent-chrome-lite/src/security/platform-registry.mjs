@@ -138,6 +138,43 @@ const PLATFORM_REGISTRY = Object.freeze({
   }),
 });
 
+// Read-only post-status pages. Navigable only by principals holding the
+// browser.verify.ref capability; write actions on these pages remain subject
+// to the normal risk policy. Used to confirm publish outcomes (审核中/已公开).
+export const STATUS_TARGETS = Object.freeze({
+  douyin: Object.freeze({
+    origin: "https://creator.douyin.com",
+    pathPrefixes: Object.freeze(["/creator-micro/content/manage"]),
+  }),
+  kuaishou: Object.freeze({
+    origin: "https://cp.kuaishou.com",
+    pathPrefixes: Object.freeze(["/article/manage/video"]),
+  }),
+  xiaohongshu: Object.freeze({
+    origin: "https://creator.xiaohongshu.com",
+    pathPrefixes: Object.freeze(["/creator/notes"]),
+  }),
+  wechat_channels: Object.freeze({
+    origin: "https://channels.weixin.qq.com",
+    pathPrefixes: Object.freeze(["/platform/post/list"]),
+  }),
+});
+
+export function isStatusTargetUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    for (const target of Object.values(STATUS_TARGETS)) {
+      if (parsed.origin !== target.origin) continue;
+      if (target.pathPrefixes.some((prefix) => parsed.pathname.startsWith(prefix))) {
+        return true;
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return false;
+}
+
 export const DEFAULT_PLATFORM_IDS = Object.freeze(
   Object.keys(PLATFORM_REGISTRY).filter((platformId) => platformId !== "suno"),
 );

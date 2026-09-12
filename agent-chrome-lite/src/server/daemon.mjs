@@ -3,10 +3,33 @@ import path from "node:path";
 import { assertAllowedUploadPath } from "../config.mjs";
 import { CAPABILITIES } from "../constants.mjs";
 import { assertContributionUrl } from "../security/contribution-policy.mjs";
+import { isStatusTargetUrl } from "../security/platform-registry.mjs";
+import { MIGRATION_PLATFORM_OFFERS } from "../profile/profile-migrator.mjs";
 import {
   classifyAction,
   classifySnapshotSurface,
 } from "../security/risk-policy.mjs";
+
+// 视频号不在迁移白名单里；best-effort 登录态 cookie 名（按域过滤后判定）。
+// 只取 sessionid：登录态以页面证据为最终仲裁（见产线 health 的双通道判定）。
+const AUTH_CHECK_EXTRA = Object.freeze({
+  wechat_channels: Object.freeze({
+    domains: Object.freeze(["channels.weixin.qq.com", "weixin.qq.com"]),
+    requiredCookieNames: Object.freeze(["sessionid"]),
+  }),
+});
+
+export function authCheckSpecFor(platform) {
+  const offer = MIGRATION_PLATFORM_OFFERS.find((entry) => entry.platform === platform);
+  if (offer) {
+    return {
+      domains: [...offer.domains],
+      requiredCookieNames: [...offer.requiredCookieNames],
+    };
+  }
+  const extra = AUTH_CHECK_EXTRA[platform];
+  return extra ? { domains: [...extra.domains], requiredCookieNames: [...extra.requiredCookieNames] } : null;
+}
 
 export class DaemonError extends Error {
   constructor(status, code, message, detail = undefined) {
@@ -50,10 +73,16 @@ export class BrowserDaemon {
     }
   }
 
-  requireContributionPage(url = this.controller.status().url) {
+  requireContributionPage(url = this.controller.status().url, identity = null) {
     try {
       assertContributionUrl(this.config, url);
     } catch (error) {
+      if (
+        identity?.capabilities?.includes(CAPABILITIES.VERIFY) &&
+        isStatusTargetUrl(url)
+      ) {
+        return;
+      }
       throw new DaemonError(403, error.code, error.message);
     }
   }
@@ -96,7 +125,7 @@ export class BrowserDaemon {
     ) {
       return false;
     }
-    this.requireContributionPage();
+    this.requireContributionPage(this.controller.status().url, identity);
     this.controller.clearHandoff();
     await this.audit.record({
       event: "handoff.auto_resumed",
@@ -169,9 +198,28 @@ export class BrowserDaemon {
         this.requireCapability(identity, CAPABILITIES.STATUS);
         return this.controller.status();
 
+      case "browser.authCheck": {
+        // 登录态探活：只回 boolean，不回传 cookie 值。要求 finalize 级权限，
+        // 与发布工作台的敏感操作同级。
+        this.requireCapability(identity, CAPABILITIES.FINALIZE);
+        const platform = String(params.platform || "");
+        const spec = authCheckSpecFor(platform);
+        if (!spec) {
+          throw new DaemonError(404, "not_found", `Unknown platform for auth check: ${platform}`);
+        }
+        const result = await this.controller.authCheck(spec);
+        await this.audit.record({
+          event: "browser.authCheck",
+          principal: identity.principal,
+          platform,
+          loggedIn: result.loggedIn,
+        });
+        return { platform, ...result };
+      }
+
       case "browser.navigate": {
         this.requireCapability(identity, CAPABILITIES.NAVIGATE);
-        this.requireContributionPage(params.url);
+        this.requireContributionPage(params.url, identity);
         return this.executor.run(async () => {
           // Keep the handoff in place while this action waits in the queue.
           if (!(await this.reconcileNavigateHandoff(identity, params.url))) {
@@ -191,7 +239,7 @@ export class BrowserDaemon {
         this.requireCapability(identity, CAPABILITIES.SNAPSHOT);
         await this.reconcileDelegatedContributionHandoff(identity);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const result = await this.controller.snapshot();
         const surfaceRisk = classifySnapshotSurface(result);
         if (surfaceRisk.blocked) {
@@ -213,7 +261,7 @@ export class BrowserDaemon {
       case "browser.screenshot": {
         this.requireCapability(identity, CAPABILITIES.SCREENSHOT);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const result = await this.controller.screenshot();
         await this.audit.record({
           event: "browser.screenshot",
@@ -229,7 +277,7 @@ export class BrowserDaemon {
       case "browser.scroll": {
         this.requireCapability(identity, CAPABILITIES.SCROLL);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const direction = String(params.direction || "");
         const amount = String(params.amount || "page");
         if (!new Set(["up", "down"]).has(direction)) {
@@ -274,7 +322,7 @@ export class BrowserDaemon {
       case "browser.captureSeries": {
         this.requireCapability(identity, CAPABILITIES.CAPTURE_SERIES);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         this.requireSunoStudioPage();
         const label =
           typeof params.label === "string" ? params.label.slice(0, 200) : "";
@@ -323,7 +371,7 @@ export class BrowserDaemon {
       case "browser.click": {
         this.requireCapability(identity, CAPABILITIES.CLICK);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const target = this.controller.resolveRef(params.ref);
         const risk = classifyAction({
           action: "click",
@@ -375,7 +423,7 @@ export class BrowserDaemon {
       case "browser.clickVisual": {
         this.requireCapability(identity, CAPABILITIES.CLICK_VISUAL);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const target = await this.controller.resolveVisualPoint(params);
         const risk = classifyAction({
           action: "click",
@@ -430,7 +478,7 @@ export class BrowserDaemon {
       case "browser.fill": {
         this.requireCapability(identity, CAPABILITIES.FILL);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         if (typeof params.value !== "string" || params.value.length > 100_000) {
           throw new DaemonError(400, "invalid_value", "Fill value is invalid or too large");
         }
@@ -469,7 +517,7 @@ export class BrowserDaemon {
         this.requireCapability(identity, CAPABILITIES.FILL);
         this.requireCapability(identity, CAPABILITIES.CLICK_VISUAL);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         if (typeof params.value !== "string" || params.value.length > 100_000) {
           throw new DaemonError(400, "invalid_value", "Fill value is invalid or too large");
         }
@@ -528,7 +576,7 @@ export class BrowserDaemon {
       case "browser.upload": {
         this.requireCapability(identity, CAPABILITIES.UPLOAD);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const inputFiles = Array.isArray(params.files) ? params.files : [];
         if (inputFiles.length < 1 || inputFiles.length > 8) {
           throw new DaemonError(400, "invalid_files", "Upload requires one to eight files");
@@ -577,7 +625,7 @@ export class BrowserDaemon {
         this.requireCapability(identity, CAPABILITIES.UPLOAD);
         this.requireCapability(identity, CAPABILITIES.CLICK_VISUAL);
         this.requireNoHandoff();
-        this.requireContributionPage();
+        this.requireContributionPage(this.controller.status().url, identity);
         const inputFiles = Array.isArray(params.files) ? params.files : [];
         if (inputFiles.length < 1 || inputFiles.length > 8) {
           throw new DaemonError(400, "invalid_files", "Upload requires one to eight files");
