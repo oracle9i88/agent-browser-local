@@ -26,6 +26,7 @@ const HTTP_ROUTES = new Map([
   ["POST /v1/auth/check", ["browser.authCheck", (body) => body]],
   ["POST /v1/dev/clear-site-data", ["browser.clearSiteData", (body) => body]],
   ["POST /v1/handoff", ["browser.handoff", (body) => body]],
+  ["POST /v1/handoff/clear", ["browser.clearHandoff", () => ({})]],
 ]);
 
 function json(res, status, payload) {

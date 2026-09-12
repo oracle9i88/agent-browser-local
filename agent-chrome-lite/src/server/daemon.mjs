@@ -699,6 +699,18 @@ export class BrowserDaemon {
         return result;
       }
 
+      case "browser.clearHandoff": {
+        // 运维：解除冻结恢复自动化（finalize 级；无人值守恢复路径，全程审计）。
+        this.requireCapability(identity, CAPABILITIES.FINALIZE);
+        const cleared = this.controller.clearHandoff();
+        await this.audit.record({
+          event: "browser.clearHandoff",
+          principal: identity.principal,
+          url: safeUrl(this.controller.status().url),
+        });
+        return { cleared };
+      }
+
       default:
         throw new DaemonError(404, "method_not_found", `Unknown method: ${method}`);
     }

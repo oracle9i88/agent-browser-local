@@ -80,6 +80,17 @@ function startupErrorMessage(error) {
   return String(error?.message || error || "未知启动错误").slice(0, 1200);
 }
 
+const MEDIA_FILE_PATH = /\.(?:mp3|m4a|wav|aac|flac|ogg|opus|mp4|mov|webm|mkv)(?:[?#].*)?$/i;
+
+export function isMediaFileUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:" && MEDIA_FILE_PATH.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 function externalAuthReason(provider) {
   if (provider === "google") {
     return "Google 登录已转到 Chrome。完成后点“同步认证”，只把 Suno/GenSpark 会话带回本窗口；同步前 Agent 保持冻结。";
@@ -249,6 +260,13 @@ function installApplicationMenu() {
 function hardenUntrustedWebContents(webContents) {
   webContents.setUserAgent(browserUserAgent);
   webContents.on("will-navigate", (event, url) => {
+    // 站点以下载为目的的媒体文件导航（如作品区 mp3 下载）：转为下载并阻止跳转，
+    // 既拿到文件又不触发"离开投稿范围"冻结——无人值守产线的关键路径。
+    if (isMediaFileUrl(url)) {
+      event.preventDefault();
+      webContents.downloadURL(url);
+      return;
+    }
     handleExternalAuthNavigation(url, { event });
   });
   webContents.on("context-menu", (_event, params) => {
