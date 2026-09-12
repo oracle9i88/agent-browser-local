@@ -116,26 +116,14 @@ export const MIGRATION_PLATFORM_OFFERS = Object.freeze([
     cookieNames: Object.freeze(["MUSIC_U", "NMTID", "NTES_SESS"]),
   },
   {
-    // best-effort：GenSpark 预计为 Clerk 会话（__session/__client 同 Suno）；
-    // required 校验不通过时按未登录安全失败，不影响其他平台。
+    // 实测确认：GenSpark 自管会话，非 Clerk。httpOnly 的 c2 为会话 Cookie，
+    // from_auth 为 OAuth 回跳标记；required 校验以 c2 为准。
     platform: "genspark",
     label: "GenSpark",
     startUrl: "https://www.genspark.ai",
     domains: Object.freeze(["genspark.ai", "www.genspark.ai"]),
-    requiredCookieNames: Object.freeze(["__session", "__client"]),
-    cookieNames: Object.freeze([
-      "__session",
-      "__client",
-      "__client_uat",
-      "clerk_active_context",
-      "sessionid",
-      "token",
-      "session",
-      "auth_token",
-      "id_token",
-      "access_token",
-      "refresh_token",
-    ]),
+    requiredCookieNames: Object.freeze(["c2"]),
+    cookieNames: Object.freeze(["c2", "from_auth", "g_state"]),
   },
 ]);
 
