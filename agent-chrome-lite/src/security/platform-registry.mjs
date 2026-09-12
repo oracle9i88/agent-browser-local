@@ -136,6 +136,20 @@ const PLATFORM_REGISTRY = Object.freeze({
       }),
     ]),
   }),
+  minimax: Object.freeze({
+    label: "MiniMax Audio 音乐创作",
+    evidence: "https://www.minimax.cn/audio/music",
+    contributionTargets: Object.freeze([
+      Object.freeze({
+        origin: "https://www.minimax.cn",
+        pathPrefixes: Object.freeze(["/audio"]),
+      }),
+      Object.freeze({
+        origin: "https://hailuoai.com",
+        pathPrefixes: Object.freeze(["/audio"]),
+      }),
+    ]),
+  }),
 });
 
 // Read-only post-status pages. Navigable only by principals holding the
