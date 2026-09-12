@@ -178,10 +178,13 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
     await client.connect(transport);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 14);
+    assert.equal(names.length, 16);
+    assert.deepEqual(names.filter((name) => /publish/i.test(name)), [
+      "browser_ximalaya_publish", "browser_ximalaya_publish_check",
+    ]);
     assert.deepEqual(
       names.filter((name) =>
-        /publish|submit|delete|pay|evaluate|script|selector/i.test(name),
+        /submit|delete|pay|evaluate|script|selector/i.test(name),
       ),
       [],
     );

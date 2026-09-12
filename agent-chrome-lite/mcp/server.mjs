@@ -40,7 +40,7 @@ const server = new McpServer({
   version: "0.2.0",
 }, {
   instructions:
-    "Contribution-only browser. Never use it to collect, enumerate, scrape, or export platform data. Take a fresh Snapshot before each action because refs expire. Use screenshot clicks only from the current screenshot. Login, verification, legal consent, creation, publishing, deletion, payment, and credit-consuming actions must be handed to the user; the daemon enforces these boundaries.",
+    "Contribution-only browser. Never use it to collect, enumerate, scrape, or export platform data. Take a fresh Snapshot before each action because refs expire. Use screenshot clicks only from the current screenshot. Login, verification, deletion, and payment must be handed to the user. Creation and publishing require local browser.finalize.ref permission or handoff; the daemon enforces these boundaries.",
 });
 
 server.registerTool(
@@ -222,6 +222,28 @@ server.registerTool(
         body: JSON.stringify({ screenshotId, x, y, mouseButton }),
       }),
     ),
+);
+
+server.registerTool(
+  "browser_ximalaya_publish_check",
+  {
+    description: "Check, without clicking, whether exactly one visible 确认发布 button is accessible in the Ximalaya upload iframe.",
+    inputSchema: {},
+  },
+  async () => textResult(await api("/v1/actions/ximalaya-publish-check", {
+    method: "POST", body: "{}",
+  })),
+);
+
+server.registerTool(
+  "browser_ximalaya_publish",
+  {
+    description: "Dispatch one audited click on the uniquely identified Ximalaya 确认发布 button. Requires local browser.finalize.ref; a returned click is not proof of publication. Never retry before checking the result.",
+    inputSchema: {},
+  },
+  async () => textResult(await api("/v1/actions/ximalaya-publish", {
+    method: "POST", body: "{}",
+  })),
 );
 
 server.registerTool(

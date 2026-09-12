@@ -17,6 +17,8 @@ const HTTP_ROUTES = new Map([
   ["POST /v1/actions/scroll", ["browser.scroll", (body) => body]],
   ["POST /v1/actions/click", ["browser.click", (body) => body]],
   ["POST /v1/actions/visual-click", ["browser.clickVisual", (body) => body]],
+  ["POST /v1/actions/ximalaya-publish-check", ["browser.inspectXimalayaPublish", () => ({})]],
+  ["POST /v1/actions/ximalaya-publish", ["browser.clickXimalayaPublish", () => ({})]],
   ["POST /v1/actions/fill", ["browser.fill", (body) => body]],
   ["POST /v1/actions/visual-fill", ["browser.fillVisual", (body) => body]],
   ["POST /v1/actions/upload", ["browser.upload", (body) => body]],
@@ -82,6 +84,8 @@ function errorStatus(error) {
   if (error instanceof DaemonError) return error.status;
   if (["stale_ref", "stale_visual_ref"].includes(error?.code)) return 409;
   if (["invalid_visual_anchor"].includes(error?.code)) return 400;
+  if (["ximalaya_upload_required"].includes(error?.code)) return 403;
+  if (["ximalaya_upload_frame_unavailable", "ximalaya_publish_target_unavailable", "ximalaya_publish_attempt_unverified"].includes(error?.code)) return 409;
   if (["page_unavailable", "cdp_command_timeout"].includes(error?.code)) return 503;
   return 500;
 }

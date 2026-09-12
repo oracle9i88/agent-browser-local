@@ -16,6 +16,7 @@ import {
 } from "./snapshot.mjs";
 import { CaptureStore, sanitizeCaptureLabel } from "./capture-store.mjs";
 import { isContributionUrlAllowed } from "../security/contribution-policy.mjs";
+import { isXimalayaUploadShell, locateXimalayaPublish } from "./ximalaya-publish.mjs";
 
 const DEFAULT_DOWNLOADS_DIR = path.join(os.homedir(), "Downloads");
 const DOWNLOAD_PERMIT_TTL_MS = 15_000;
@@ -190,6 +191,7 @@ export class BrowserController extends EventEmitter {
       maxHints: config.security.maxSnapshotHints,
     });
     this.screenshotState = null;
+    this.ximalayaPublishAttempted = false;
     this.handoff = null;
     this.lastNavigationActivityAt = Date.now();
 
@@ -217,11 +219,13 @@ export class BrowserController extends EventEmitter {
 
     webContents.on("did-navigate", (_event, url) => {
       this.lastNavigationActivityAt = Date.now();
+      if (!isXimalayaUploadShell(url)) this.ximalayaPublishAttempted = false;
       this.invalidate();
       reconcileContributionScope(url);
     });
     webContents.on("did-navigate-in-page", (_event, url) => {
       this.lastNavigationActivityAt = Date.now();
+      if (!isXimalayaUploadShell(url)) this.ximalayaPublishAttempted = false;
       this.invalidate();
       reconcileContributionScope(url);
     });
@@ -670,6 +674,36 @@ export class BrowserController extends EventEmitter {
     return { ok: true };
   }
 
+  async inspectXimalayaPublish() {
+    this.assertPageAvailable();
+    if (this.ximalayaPublishAttempted) {
+      const error = new Error("Publication result is unverified; do not click again on this form");
+      error.code = "ximalaya_publish_attempt_unverified";
+      throw error;
+    }
+    const metrics = await this.cdp.send("Page.getLayoutMetrics");
+    const visual = metrics.cssVisualViewport || metrics.cssLayoutViewport;
+    const target = await locateXimalayaPublish(this.cdp, this.webContents.getURL(), {
+      width: Number(visual?.clientWidth) || 0,
+      height: Number(visual?.clientHeight) || 0,
+    });
+    return target;
+  }
+
+  async clickXimalayaPublish() {
+    if (this.ximalayaPublishAttempted) {
+      const error = new Error("Publication result is unverified; do not click again on this form");
+      error.code = "ximalaya_publish_attempt_unverified";
+      throw error;
+    }
+    // Resolve afresh inside the execution queue; never reuse stale iframe
+    // coordinates across navigation, scroll, or another agent's action.
+    const target = await this.inspectXimalayaPublish();
+    this.ximalayaPublishAttempted = true;
+    await this.clickPoint(target.childPoint, { sessionId: target.sessionId });
+    return { ok: true, result: "click_dispatched_verify_publication" };
+  }
+
   async scroll({ direction, amount, anchor }) {
     this.assertPageAvailable();
     const maxSteps = amount === "bottom" ? 12 : 1;
@@ -786,7 +820,7 @@ export class BrowserController extends EventEmitter {
     };
   }
 
-  async clickPoint({ x, y }, { mouseButton = "left" } = {}) {
+  async clickPoint({ x, y }, { mouseButton = "left", sessionId } = {}) {
     if (!new Set(["left", "right"]).has(mouseButton)) {
       const error = new Error("mouseButton must be left or right");
       error.code = "invalid_mouse_button";
@@ -798,7 +832,7 @@ export class BrowserController extends EventEmitter {
       x,
       y,
       button: "none",
-    });
+    }, { sessionId });
     await delay(90);
     await this.cdp.send("Input.dispatchMouseEvent", {
       type: "mousePressed",
@@ -807,7 +841,7 @@ export class BrowserController extends EventEmitter {
       button: mouseButton,
       buttons,
       clickCount: 1,
-    });
+    }, { sessionId });
     await delay(75);
     await this.cdp.send("Input.dispatchMouseEvent", {
       type: "mouseReleased",
@@ -816,7 +850,7 @@ export class BrowserController extends EventEmitter {
       button: mouseButton,
       buttons: 0,
       clickCount: 1,
-    });
+    }, { sessionId });
     this.invalidate();
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-browser-local",
-  "version": "0.3.0-beta.17",
+  "version": "0.3.0-beta.18",
   "description": "Contribution-only local Chromium browser for Codex, Claude, NovaGe and NovaDe",
   "private": true,
   "repository": {
@@ -30,6 +30,7 @@
     "test": "node --test",
     "test:upload": "electron ./test/electron-gold-app",
     "test:chromium-gold": "electron ./test/electron-gold-app",
+    "test:frame-gold": "electron ./test/electron-frame-gold-app",
     "test:mcp": "node ./scripts/mcp-smoke.mjs",
     "test:ws": "node ./scripts/ws-smoke.mjs",
     "test:protocols": "ABL_PROTOCOL_TEST=1 node --test ./test/protocol-adapters.test.mjs",

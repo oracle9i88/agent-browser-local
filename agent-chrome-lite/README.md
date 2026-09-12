@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.17`（Public Preview）。喜马拉雅 Studio 上传二阶段表单已验收，见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前代码：`v0.3.0-beta.18` 候选版（喜马拉雅嵌入页发布按钮待真实账号验收）。已有上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -197,7 +197,9 @@ ABL_TOKEN='对应 principal 的 token' \
 node "$PROJECT_DIR/mcp/server.mjs"
 ```
 
-工具只有：status、navigate、snapshot、有限步长 scroll、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
+工具包括 status、navigate、snapshot、有限步长 scroll、click/ref、fill/ref、upload/ref、当前截图、截图动态点击、喜马拉雅嵌入页发布检查/单次点击和 handoff。常规发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
+
+喜马拉雅上传页的跨域嵌入表单有专用的非破坏性检查 `POST /v1/actions/ximalaya-publish-check`。确定目标专辑、AI 声明、分类和上传状态正确后，具有本地代发布权限的 principal 才可调用 `POST /v1/actions/ximalaya-publish` **一次**。接口在嵌入页按 AX 名称唯一定位「确认发布」，重新读取按钮几何位置，并向子页面发送 CDP 鼠标事件；外壳、嵌入页和按钮不符合预期则拒绝。返回值只代表点击派发，不代表发布成功；在同一上传表单上禁止二次点击。按 [喜马拉雅发布 skill](skills/ximalaya-publish/SKILL.md) 验证节目是否真的进入「审核中」或「已发布」。
 
 不把 token 写进 MCP 配置的固定 principal 启动方式见 [config/MCP-SETUP.md](config/MCP-SETUP.md)。
 
@@ -208,11 +210,14 @@ npm run check
 npm test
 npm run test:upload
 npm run test:chromium-gold
+npm run test:frame-gold
 npm run test:protocols
 npm run test:python
 ```
 
 `test:upload` 与 `test:chromium-gold` 指向同一个真实 Chromium 金样：验证原生/语义上传、富文本多段落和链接保真、刷新后语义重新发现、旧 ref 失效、只投稿 Snapshot 隐私边界，以及同一 fixture 的确定性渲染。
+
+`test:frame-gold` 使用两张临时本机网页验证跨域子页面独立 CDP 会话、AX 按钮和固定底栏真实鼠标事件，不连接喜马拉雅账号。
 
 `test:protocols` 在随机 loopback 端口启动隔离 daemon，验证真实 HTTP、WebSocket 和 MCP 链，不连接正在登录的平台浏览器。`test:python` 验证 NovaGe/NovaDe 的固定 principal HTTP 适配器。
 
@@ -236,7 +241,7 @@ npm run agent-permissions -- --revoke-suno-studio codex
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.17`（验收通过后创建）
+- 最近已验证 tag：`v0.3.0-beta.17`；`beta.18` 当前仅为候选代码，真实喜马拉雅发布验收后再打 tag。
 - GitHub：`codex/scroll-beta12` 保存候选源码；tag 在打包和验收通过后固定审计提交。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
