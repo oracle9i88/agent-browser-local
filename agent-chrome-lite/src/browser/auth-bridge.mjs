@@ -12,6 +12,23 @@ const AUTH_COOKIE_NAMES = new Set([
 
 const AUTH_DOMAINS = new Set(["suno.com", "auth.suno.com", "app.suno.ai"]);
 
+// GenSpark 会话：同样基于 Clerk 体系（__session/__client 同 Suno），
+// 并保留常见 token 名以备其自管会话；按域过滤后仍只允许白名单名。
+const GENSPARK_AUTH_DOMAINS = new Set(["genspark.ai", "www.genspark.ai"]);
+const GENSPARK_AUTH_COOKIE_NAMES = new Set([
+  "__session",
+  "__client",
+  "__client_uat",
+  "clerk_active_context",
+  "sessionid",
+  "token",
+  "session",
+  "auth_token",
+  "id_token",
+  "access_token",
+  "refresh_token",
+]);
+
 function normalizedDomain(value) {
   return String(value || "").toLowerCase().replace(/^\./, "");
 }
@@ -19,6 +36,12 @@ function normalizedDomain(value) {
 function cookieUrl(cookie) {
   const domain = normalizedDomain(cookie.domain);
   const host = domain === "suno.com" || domain.endsWith(".suno.com") ? domain : "app.suno.ai";
+  return `https://${host}${cookie.path || "/"}`;
+}
+
+function gensparkCookieUrl(cookie) {
+  const domain = normalizedDomain(cookie.domain);
+  const host = domain === "genspark.ai" || domain.endsWith(".genspark.ai") ? domain : "www.genspark.ai";
   return `https://${host}${cookie.path || "/"}`;
 }
 
@@ -30,14 +53,14 @@ function normalizeSameSite(value) {
   return undefined;
 }
 
-export function selectSunoAuthCookies(cookies) {
+function selectAuthCookies(cookies, { domains, names, urlFor }) {
   return (Array.isArray(cookies) ? cookies : [])
-    .filter((cookie) => AUTH_DOMAINS.has(normalizedDomain(cookie.domain)))
-    .filter((cookie) => AUTH_COOKIE_NAMES.has(String(cookie.name || "")))
+    .filter((cookie) => domains.has(normalizedDomain(cookie.domain)))
+    .filter((cookie) => names.has(String(cookie.name || "")))
     .filter((cookie) => typeof cookie.value === "string" && cookie.value.length > 0)
     .map((cookie) => {
       const normalized = {
-        url: cookieUrl(cookie),
+        url: urlFor(cookie),
         name: String(cookie.name),
         value: cookie.value,
         domain: cookie.domain,
@@ -54,16 +77,52 @@ export function selectSunoAuthCookies(cookies) {
     });
 }
 
-export async function importSunoAuthCookies({ cookies, cookieStore }) {
+export function selectSunoAuthCookies(cookies) {
+  return selectAuthCookies(cookies, {
+    domains: AUTH_DOMAINS,
+    names: AUTH_COOKIE_NAMES,
+    urlFor: cookieUrl,
+  });
+}
+
+export function selectGenSparkAuthCookies(cookies) {
+  return selectAuthCookies(cookies, {
+    domains: GENSPARK_AUTH_DOMAINS,
+    names: GENSPARK_AUTH_COOKIE_NAMES,
+    urlFor: gensparkCookieUrl,
+  });
+}
+
+async function importAuthCookies({ cookies, cookieStore, select, emptyCode, emptyMessage }) {
   if (!cookieStore || typeof cookieStore.set !== "function") {
     throw new Error("Electron cookie store is unavailable");
   }
-  const selected = selectSunoAuthCookies(cookies);
+  const selected = select(cookies);
   if (selected.length === 0) {
-    const error = new Error("Chrome 中没有可同步的 Suno 登录会话；请确认 Google 登录已完成并停留在 Suno 页面");
-    error.code = "suno_auth_cookie_not_found";
+    const error = new Error(emptyMessage);
+    error.code = emptyCode;
     throw error;
   }
   for (const cookie of selected) await cookieStore.set(cookie);
   return { count: selected.length };
+}
+
+export async function importSunoAuthCookies({ cookies, cookieStore }) {
+  return importAuthCookies({
+    cookies,
+    cookieStore,
+    select: selectSunoAuthCookies,
+    emptyCode: "suno_auth_cookie_not_found",
+    emptyMessage: "Chrome 中没有可同步的 Suno 登录会话；请确认 Google 登录已完成并停留在 Suno 页面",
+  });
+}
+
+export async function importGenSparkAuthCookies({ cookies, cookieStore }) {
+  return importAuthCookies({
+    cookies,
+    cookieStore,
+    select: selectGenSparkAuthCookies,
+    emptyCode: "genspark_auth_cookie_not_found",
+    emptyMessage: "Chrome 中没有可同步的 GenSpark 登录会话；请确认 Google 登录已完成并停留在 GenSpark 页面",
+  });
 }

@@ -15,9 +15,15 @@ import {
   openChromeSessionBridge,
   openInChrome,
 } from "./browser/chrome-launcher.mjs";
-import { importSunoAuthCookies } from "./browser/auth-bridge.mjs";
+import {
+  importGenSparkAuthCookies,
+  importSunoAuthCookies,
+} from "./browser/auth-bridge.mjs";
 import { BrowserController } from "./browser/controller.mjs";
-import { readSunoCookiesFromChrome } from "./browser/chrome-cdp.mjs";
+import {
+  readGenSparkCookiesFromChrome,
+  readSunoCookiesFromChrome,
+} from "./browser/chrome-cdp.mjs";
 import { ContributionPopupRouter } from "./browser/popup-router.mjs";
 import { classifyExternalAuthUrl } from "./browser/external-auth.mjs";
 import { createSpaceManager, DEFAULT_SPACE_ID } from "./browser/space-manager.mjs";
@@ -76,9 +82,9 @@ function startupErrorMessage(error) {
 
 function externalAuthReason(provider) {
   if (provider === "google") {
-    return "Google 登录已转到 Chrome。完成后点“同步认证”，只把 Suno 会话带回本窗口；同步前 Agent 保持冻结。";
+    return "Google 登录已转到 Chrome。完成后点“同步认证”，只把 Suno/GenSpark 会话带回本窗口；同步前 Agent 保持冻结。";
   }
-  return "Suno 登录已转到 Chrome。完成后点“同步认证”，只把 Suno 会话带回本窗口；同步前 Agent 保持冻结。";
+  return "Suno 登录已转到 Chrome。完成后点“同步认证”，只把 Suno/GenSpark 会话带回本窗口；同步前 Agent 保持冻结。";
 }
 
 function setExternalAuthHandoff(auth) {
@@ -136,25 +142,51 @@ async function syncPendingExternalAuth() {
     throw new Error("当前没有等待同步的外部认证");
   }
   if (pendingExternalAuth.provider !== "google" && pendingExternalAuth.provider !== "suno") {
-    throw new Error("当前认证来源不支持 Suno 会话同步");
+    throw new Error("当前认证来源不支持会话同步");
   }
   const endpoint = process.env.ABL_CHROME_CDP_URL || "http://127.0.0.1:9222";
-  const { targetUrl, cookies } = await readSunoCookiesFromChrome({ endpoint });
-  const imported = await importSunoAuthCookies({
-    cookies,
-    cookieStore: browsingSession.cookies,
-  });
+  // Google 登录可能服务于 Suno 或 GenSpark（或两者）：能同步多少同步多少，
+  // 但至少成功一路，否则维持错误。
+  const synced = [];
+  let lastError = null;
+  try {
+    const { targetUrl, cookies } = await readSunoCookiesFromChrome({ endpoint });
+    const imported = await importSunoAuthCookies({
+      cookies,
+      cookieStore: browsingSession.cookies,
+    });
+    synced.push({ targetUrl, ...imported });
+  } catch (error) {
+    lastError = lastError ?? error;
+  }
+  try {
+    const { targetUrl, cookies } = await readGenSparkCookiesFromChrome({ endpoint });
+    const imported = await importGenSparkAuthCookies({
+      cookies,
+      cookieStore: browsingSession.cookies,
+    });
+    synced.push({ targetUrl, ...imported });
+  } catch (error) {
+    lastError = lastError ?? error;
+  }
+  if (synced.length === 0) {
+    throw (
+      lastError ??
+      new Error("同步失败：Chrome 中没有可同步的 Suno/GenSpark 会话")
+    );
+  }
+  const count = synced.reduce((sum, entry) => sum + entry.count, 0);
   controller?.setHandoff(
-    `已同步 ${imported.count} 项 Suno 会话资料。页面正在刷新；确认已回到已登录页面后，再点击“交还 Agent”。`,
+    `已同步 ${count} 项会话资料（Suno/GenSpark）。页面正在刷新；确认已回到已登录页面后，再点击“交还 Agent”。`,
     {
       code: "external_auth_synced",
       provider: pendingExternalAuth.provider,
-      targetUrl,
-      importedCookies: imported.count,
+      targetUrl: synced[0].targetUrl,
+      importedCookies: count,
     },
   );
   await controller?.reload();
-  return { ...imported, targetUrl };
+  return { count, targetUrl: synced[0].targetUrl };
 }
 
 function handleExternalAuthNavigation(url, { event, childWindow } = {}) {

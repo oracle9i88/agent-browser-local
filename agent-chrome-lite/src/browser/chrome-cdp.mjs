@@ -185,3 +185,30 @@ export async function readSunoCookiesFromChrome(options = {}) {
     cookies: await getChromeCookies(target, options),
   };
 }
+
+export function isGenSparkTarget(target) {
+  try {
+    const hostname = new URL(String(target?.url || "")).hostname.toLowerCase();
+    return hostname === "genspark.ai" || hostname.endsWith(".genspark.ai");
+  } catch {
+    return false;
+  }
+}
+
+export async function readGenSparkCookiesFromChrome(options = {}) {
+  const targets = await listChromeTargets(options);
+  const target = targets.find(isGenSparkTarget);
+  if (!target) {
+    const error = new Error("Chrome 中没有打开 GenSpark 页面；请完成 Google 登录后保留 GenSpark 页面，再点同步认证");
+    error.code = "genspark_target_not_found";
+    throw error;
+  }
+  return {
+    targetUrl: target.url,
+    cookies: await getChromeCookiesForUrls(
+      target,
+      ["https://www.genspark.ai/", "https://genspark.ai/"],
+      options,
+    ),
+  };
+}
