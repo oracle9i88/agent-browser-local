@@ -172,10 +172,11 @@ export class BrowserDaemon {
       case "browser.navigate": {
         this.requireCapability(identity, CAPABILITIES.NAVIGATE);
         this.requireContributionPage(params.url);
-        if (!(await this.reconcileNavigateHandoff(identity, params.url))) {
-          this.requireNoHandoff();
-        }
         return this.executor.run(async () => {
+          // Keep the handoff in place while this action waits in the queue.
+          if (!(await this.reconcileNavigateHandoff(identity, params.url))) {
+            this.requireNoHandoff();
+          }
           const result = await this.controller.navigate(params.url);
           await this.audit.record({
             event: "browser.navigate",

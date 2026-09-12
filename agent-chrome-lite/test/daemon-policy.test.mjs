@@ -425,6 +425,29 @@ test("navigate auto-resumes an outside-contribution-scope handoff when the targe
   assert.equal(events[0].via, "browser.navigate");
 });
 
+test("queued recovery keeps the handoff until its navigation starts", async () => {
+  const { controller, daemon, identity } = navigateFixture({
+    handoffCode: "outside_contribution_scope",
+  });
+  let startQueuedAction;
+  daemon.executor = {
+    run: (task) => new Promise((resolve, reject) => {
+      startQueuedAction = () => Promise.resolve().then(task).then(resolve, reject);
+    }),
+  };
+
+  const navigation = daemon.dispatch(identity, "browser.navigate", {
+    url: "https://example.test/create",
+  });
+  assert.equal(controller.handoff?.detail?.code, "outside_contribution_scope");
+  assert.equal(controller.navigateCount, 0);
+
+  await startQueuedAction();
+  await navigation;
+  assert.equal(controller.handoff, null);
+  assert.equal(controller.navigateCount, 1);
+});
+
 test("navigate still blocks on handoffs that require human attention", async () => {
   const { controller, daemon, identity } = navigateFixture({
     handoffCode: "page_unavailable",
