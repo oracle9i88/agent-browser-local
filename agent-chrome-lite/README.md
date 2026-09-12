@@ -1,8 +1,8 @@
 # Agent Browser Local
 
-供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
+供 Codex、Claude、NovaGe、NovaDe、Kimi 共用的本地独立 Chromium 浏览器。它以把用户自己的内容送上平台为主；MiniMax 仅额外允许逐首下载用户自己生成的音乐成品，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前版本：`v0.3.0-beta.17`（Public Preview）。喜马拉雅 Studio 上传二阶段表单已验收，见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前代码：`v0.3.0-beta.19` 候选版（MiniMax 无水印 MP3 下载已在已登录账号验收；其他平台发布能力另行验收）。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -22,6 +22,7 @@
 - 投稿页提供受权限控制的 `browser.scroll`：支持有限的人类步长，也支持最多 12 步、逐步节流的 `bottom`；只读取视口几何，不读取或导出页面正文，方向/步幅进入审计。普通文档能可靠回报 `reachedEnd`；SPA 内层滚动容器无法从文档几何证明到底时会返回 `false`，由下一张截图复核，禁止假报成功。
 - `browser.captureSeries` 只在 Suno Studio 可用，并要求来自 60 秒内当前截图的视觉锚点；daemon 循环保存完整截图并滚动，以左侧轨道编号/名称栏的裁剪哈希判断进度，排除 Magic Bar 轮换提示等动画干扰。连续两次轨道栏不变才报告到底。截图写入 `~/.agent-browser-local/captures/<label>-<timestamp>/`，manifest 同时记录完整图片哈希、稳定判定哈希和不含查询串的页面地址。
 - Suno Studio 多轨本机导出使用一次性、15 秒短期许可：只有经 daemon 风险策略识别并审计的 `Export → Multitrack` 才能触发自动落盘；普通歌曲页 Download 不使用这条通道。片段 `Download .WAV` 及其系统保存流程由用户本人完成。`browser.downloadStatus` 返回 Agent 发起的多轨在飞/已完成记录。
+- MiniMax 音乐创作页在本机显式启用 `minimax_music`，且 principal 获得 `browser.download.minimax` 后，可对用户指定的现成作品逐首点击 `MP3(无水印)`。每次点击只放行一个来自 MiniMax 音乐 CDN 的无水印 MP3，自动写入 Downloads，`browser.downloadStatus` 回报完成状态；多个作品可以逐首重复，不是总次数限制。实测同名不同版本得到原名与 `(2)` 文件，均无需系统保存窗口；下载后不再误触发离开投稿范围接管。见 [MiniMax 下载 skill](skills/minimax-download/SKILL.md)。
 - 文件上传通过 Snapshot 找到原生文件输入；隐藏输入可从语义上传入口或 60 秒有效的当前截图动态按钮拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
@@ -34,6 +35,12 @@
 - macOS 单实例锁：重复双击只唤醒已运行窗口，不创建第二个 daemon 或第二套 Profile。
 - 启动失败会显示本地错误窗口；页面故障会在工具栏显示红色状态，同时明确保留登录资料。
 - Google/Suno 登录不会在 Electron 内嵌窗口里反复尝试：迁移向导可打开使用独立持久 Profile 的 Chrome 会话桥；用户只在该 Chrome 完成 Google 登录，随后逐域授权 `suno.com` 与 `auth.suno.com` 同步。桥只读取 Suno/Clerk 最小白名单 Cookie，Google Cookie、密码、整份 Chrome Profile 均不读取。同步后程序必须以页面出现 Profile menu/credits 且 Log in 消失作为真实验收；仅有“Cookie 已注入”不能判定登录成功。
+
+## Genspark 试探记录（2026-09-13，未交付）
+
+- 同一台机器的日常 Chrome 可以打开已有 Genspark 会话；Macian 打开 `https://www.genspark.ai/ai_image` 则出现“登录或注册 / 使用 Google 继续”。这只证明两个浏览器的登录态未互通，不证明具体缺的是哪一种 Cookie 或站点存储。
+- 当前平台登记与登录态迁移均不包含 Genspark，Agent 因页面不在允许范围内进入接管状态；Genspark 生成、作品定位和下载均未在 Macian 验收，不能按 MiniMax 下载能力使用。
+- 本次没有读取或迁移 Google 凭据、Cookie 或浏览器存储，也没有要求用户重新登录。后续若立项，须先设计仅限 Genspark 域的会话交接与权限边界，并以实际登录标志和一件用户指定作品的下载落盘为验收标准；不得把“已注入 Cookie”当作登录成功。
 
 ## 明确不提供
 
@@ -197,7 +204,9 @@ ABL_TOKEN='对应 principal 的 token' \
 node "$PROJECT_DIR/mcp/server.mjs"
 ```
 
-工具只有：status、navigate、snapshot、有限步长 scroll、click/ref、fill/ref、upload/ref、当前截图、截图动态点击和 handoff。发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
+工具包括 status、navigate、snapshot、有限步长 scroll、click/ref、fill/ref、upload/ref、当前截图、截图动态点击、喜马拉雅嵌入页发布检查/单次点击和 handoff。常规发布仍复用短期 Snapshot `ref`；是否允许执行由 daemon 本地 `browser.finalize.ref` capability 决定，协议参数不能提权。
+
+喜马拉雅上传页的跨域嵌入表单有专用的非破坏性检查 `POST /v1/actions/ximalaya-publish-check`。确定目标专辑、AI 声明、分类和上传状态正确后，具有本地代发布权限的 principal 才可调用 `POST /v1/actions/ximalaya-publish` **一次**。接口在嵌入页按 AX 名称唯一定位「确认发布」，重新读取按钮几何位置，并向子页面发送 CDP 鼠标事件；外壳、嵌入页和按钮不符合预期则拒绝。返回值只代表点击派发，不代表发布成功；在同一上传表单上禁止二次点击。按 [喜马拉雅发布 skill](skills/ximalaya-publish/SKILL.md) 验证节目是否真的进入「审核中」或「已发布」。
 
 不把 token 写进 MCP 配置的固定 principal 启动方式见 [config/MCP-SETUP.md](config/MCP-SETUP.md)。
 
@@ -208,11 +217,14 @@ npm run check
 npm test
 npm run test:upload
 npm run test:chromium-gold
+npm run test:frame-gold
 npm run test:protocols
 npm run test:python
 ```
 
 `test:upload` 与 `test:chromium-gold` 指向同一个真实 Chromium 金样：验证原生/语义上传、富文本多段落和链接保真、刷新后语义重新发现、旧 ref 失效、只投稿 Snapshot 隐私边界，以及同一 fixture 的确定性渲染。
+
+`test:frame-gold` 使用两张临时本机网页验证跨域子页面独立 CDP 会话、AX 按钮和固定底栏真实鼠标事件，不连接喜马拉雅账号。
 
 `test:protocols` 在随机 loopback 端口启动隔离 daemon，验证真实 HTTP、WebSocket 和 MCP 链，不连接正在登录的平台浏览器。`test:python` 验证 NovaGe/NovaDe 的固定 principal HTTP 适配器。
 
@@ -232,12 +244,15 @@ npm run agent-permissions -- --grant-finalize codex
 npm run agent-permissions -- --revoke-finalize codex
 npm run agent-permissions -- --grant-suno-studio codex
 npm run agent-permissions -- --revoke-suno-studio codex
+npm run platforms -- minimax_music
+npm run agent-permissions -- --grant-minimax-download kimi
+npm run agent-permissions -- --revoke-minimax-download kimi
 ```
 
 ## 发布状态
 
-- Git tag：`v0.3.0-beta.17`（验收通过后创建）
-- GitHub：`codex/scroll-beta12` 保存候选源码；tag 在打包和验收通过后固定审计提交。
+- 最近已验证 tag：`v0.3.0-beta.17`；`beta.19` 为 MiniMax 下载候选代码，真实账号下载已验收，其他平台发布能力不随此版本宣称验收。
+- GitHub：`codex/minimax-download-beta19` 保存本次源码与 Kimi skill；tag 在审计提交后另行固定。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 

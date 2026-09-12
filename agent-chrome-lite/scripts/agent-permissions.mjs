@@ -18,6 +18,8 @@ function usage() {
     "  npm run agent-permissions -- --revoke-suno-studio <principal>",
     "  npm run agent-permissions -- --grant-suno-credits <principal>",
     "  npm run agent-permissions -- --revoke-suno-credits <principal>",
+    "  npm run agent-permissions -- --grant-minimax-download <principal>",
+    "  npm run agent-permissions -- --revoke-minimax-download <principal>",
   ].join("\n");
 }
 
@@ -34,12 +36,21 @@ export function updateSunoCreditsCapability(config, principal, enabled) {
 }
 
 export function updateSunoStudioCapabilities(config, principal, enabled) {
-  return updateCapabilities(
-    config,
-    principal,
-    [CAPABILITIES.CAPTURE_SERIES, CAPABILITIES.DOWNLOAD_STATUS],
-    enabled,
-  );
+  updateCapabilities(config, principal, [CAPABILITIES.CAPTURE_SERIES], enabled);
+  const agent = config.agents.find((entry) => entry.principal === principal);
+  if (enabled || !agent.capabilities.includes(CAPABILITIES.MINIMAX_DOWNLOAD)) {
+    updateCapabilities(config, principal, [CAPABILITIES.DOWNLOAD_STATUS], enabled);
+  }
+  return config;
+}
+
+export function updateMiniMaxDownloadCapabilities(config, principal, enabled) {
+  updateCapabilities(config, principal, [CAPABILITIES.MINIMAX_DOWNLOAD], enabled);
+  const agent = config.agents.find((entry) => entry.principal === principal);
+  if (enabled || !agent.capabilities.includes(CAPABILITIES.CAPTURE_SERIES)) {
+    updateCapabilities(config, principal, [CAPABILITIES.DOWNLOAD_STATUS], enabled);
+  }
+  return config;
 }
 
 function updateCapabilities(config, principal, capabilities, enabled) {
@@ -73,11 +84,13 @@ async function main() {
         agent.capabilities?.includes(CAPABILITIES.CAPTURE_SERIES) &&
         agent.capabilities?.includes(CAPABILITIES.DOWNLOAD_STATUS);
       const sunoCredits = agent.capabilities?.includes(CAPABILITIES.CREDITS_SUNO);
+      const miniMaxDownload = agent.capabilities?.includes(CAPABILITIES.MINIMAX_DOWNLOAD);
       process.stdout.write(
         `${agent.principal}\tfinalize=${finalize ? "on" : "off"}` +
         `\tverify=${verify ? "on" : "off"}` +
         `\tsuno-studio=${sunoStudio ? "on" : "off"}` +
-        `\tsuno-credits=${sunoCredits ? "on" : "off"}\n`,
+        `\tsuno-credits=${sunoCredits ? "on" : "off"}` +
+        `\tminimax-download=${miniMaxDownload ? "on" : "off"}\n`,
       );
     }
     return;
@@ -92,6 +105,8 @@ async function main() {
     ["--revoke-suno-studio", { kind: "suno-studio", enabled: false }],
     ["--grant-suno-credits", { kind: "suno-credits", enabled: true }],
     ["--revoke-suno-credits", { kind: "suno-credits", enabled: false }],
+    ["--grant-minimax-download", { kind: "minimax-download", enabled: true }],
+    ["--revoke-minimax-download", { kind: "minimax-download", enabled: false }],
   ]);
   const action = actions.get(command);
   if (!action || !principal) {
@@ -104,6 +119,8 @@ async function main() {
     updateVerifyCapability(config, principal, action.enabled);
   } else if (action.kind === "suno-credits") {
     updateSunoCreditsCapability(config, principal, action.enabled);
+  } else if (action.kind === "minimax-download") {
+    updateMiniMaxDownloadCapabilities(config, principal, action.enabled);
   } else {
     updateSunoStudioCapabilities(config, principal, action.enabled);
   }

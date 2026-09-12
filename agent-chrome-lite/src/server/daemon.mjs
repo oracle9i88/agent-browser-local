@@ -409,6 +409,11 @@ export class BrowserDaemon {
               principal: identity.principal,
             });
           }
+          if (risk.code === "minimax_download_requires_local_grant") {
+            downloadPermit = this.controller.armMiniMaxDownload({
+              principal: identity.principal,
+            });
+          }
           let result;
           try {
             result = await this.controller.clickRef(params.ref, {
@@ -417,6 +422,7 @@ export class BrowserDaemon {
           } catch (error) {
             if (downloadPermit) {
               this.controller.disarmSunoDownload(downloadPermit.permitId);
+              this.controller.disarmMiniMaxDownload(downloadPermit.permitId);
             }
             throw error;
           }
@@ -464,6 +470,11 @@ export class BrowserDaemon {
               principal: identity.principal,
             });
           }
+          if (risk.code === "minimax_download_requires_local_grant") {
+            downloadPermit = this.controller.armMiniMaxDownload({
+              principal: identity.principal,
+            });
+          }
           let result;
           try {
             result = await this.controller.clickVisual(target.point, {
@@ -472,6 +483,7 @@ export class BrowserDaemon {
           } catch (error) {
             if (downloadPermit) {
               this.controller.disarmSunoDownload(downloadPermit.permitId);
+              this.controller.disarmMiniMaxDownload(downloadPermit.permitId);
             }
             throw error;
           }
@@ -482,6 +494,47 @@ export class BrowserDaemon {
             role: target.node.role,
             name: target.node.name,
             mouseButton: params.mouseButton || "left",
+            url: safeUrl(this.controller.status().url),
+          });
+          return result;
+        });
+      }
+
+      case "browser.inspectXimalayaPublish": {
+        this.requireCapability(identity, CAPABILITIES.SNAPSHOT);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        const target = await this.controller.inspectXimalayaPublish();
+        this.requireContributionPage(target.frameUrl);
+        return { ready: true, name: target.node.name, frameUrl: target.frameUrl };
+      }
+
+      case "browser.clickXimalayaPublish": {
+        this.requireCapability(identity, CAPABILITIES.CLICK);
+        this.requireNoHandoff();
+        this.requireContributionPage();
+        return this.executor.run(async () => {
+          this.requireNoHandoff();
+          const target = await this.controller.inspectXimalayaPublish();
+          this.requireContributionPage(target.frameUrl);
+          const risk = classifyAction({
+            action: "click", node: target.node, url: target.frameUrl,
+          });
+          if (!risk.blocked || risk.code !== "irreversible_action_requires_handoff") {
+            throw new DaemonError(409, "publish_risk_mismatch", "Publish control could not be verified");
+          }
+          const context = { action: "clickXimalayaPublish", ref: "确认发布" };
+          if (!risk.delegableCapability ||
+              !identity.capabilities.includes(risk.delegableCapability)) {
+            return this.blocked(identity, risk, context);
+          }
+          await this.recordDelegatedAction(identity, risk, context);
+          const result = await this.controller.clickXimalayaPublish();
+          await this.audit.record({
+            event: "browser.clickXimalayaPublish",
+            principal: identity.principal,
+            name: target.node.name,
+            frameUrl: target.frameUrl,
             url: safeUrl(this.controller.status().url),
           });
           return result;

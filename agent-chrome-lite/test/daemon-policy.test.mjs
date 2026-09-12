@@ -145,6 +145,41 @@ test("locally granted finalize capability also permits visual publishing", async
   assert.equal(events[1].event, "browser.clickVisual");
 });
 
+test("Ximalaya iframe publish needs local finalize, one fresh lookup, and audit", async () => {
+  const { controller, daemon, identity, events } = fixture({});
+  controller.status = function () {
+    return { url: "https://studio.ximalaya.com/upload", handoff: this.handoff };
+  };
+  daemon.config.security.contributionTargets.push({
+    origin: "https://studio.ximalaya.com", pathPrefixes: ["/upload"],
+  }, {
+    origin: "https://www.ximalaya.com", pathPrefixes: ["/reform-upload"],
+  });
+  let inspections = 0;
+  controller.inspectXimalayaPublish = async () => {
+    inspections += 1;
+    return {
+      frameUrl: "https://www.ximalaya.com/reform-upload/page/webCenter/upload",
+      node: { tag: "button", role: "button", name: "确认发布" },
+    };
+  };
+  controller.clickXimalayaPublish = async () => ({ ok: true, result: "click_dispatched_verify_publication" });
+  identity.capabilities.push(CAPABILITIES.SNAPSHOT);
+
+  const ready = await daemon.dispatch(identity, "browser.inspectXimalayaPublish");
+  assert.equal(ready.ready, true);
+  await assert.rejects(daemon.dispatch(identity, "browser.clickXimalayaPublish"),
+    (error) => error.code === "irreversible_action_requires_handoff");
+  assert.equal(events.some((event) => event.event === "browser.clickXimalayaPublish"), false);
+  controller.clearHandoff();
+  identity.capabilities.push(CAPABILITIES.FINALIZE);
+  const result = await daemon.dispatch(identity, "browser.clickXimalayaPublish");
+  assert.equal(result.result, "click_dispatched_verify_publication");
+  assert.equal(inspections, 3);
+  assert.equal(events.at(-2).event, "action.delegated");
+  assert.equal(events.at(-1).event, "browser.clickXimalayaPublish");
+});
+
 test("semantic and visual clicks forward an audited right mouse button", async () => {
   const semantic = fixture({ tag: "span", role: "button", name: "Audio clip" });
   await semantic.daemon.dispatch(semantic.identity, "browser.click", {

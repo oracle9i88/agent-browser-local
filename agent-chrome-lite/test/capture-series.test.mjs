@@ -8,6 +8,8 @@ import path from "node:path";
 import {
   availableDownloadPath,
   BrowserController,
+  isMiniMaxMusicDownload,
+  isMiniMaxMusicUrl,
   isSunoStudioUrl,
   sanitizeDownloadFilename,
 } from "../src/browser/controller.mjs";
@@ -235,6 +237,56 @@ test("download helpers reject non-Studio URLs and avoid overwriting", () => {
     (value) => value.endsWith("stems.wav"),
   );
   assert.equal(candidate, "/tmp/stems (2).wav");
+});
+
+test("MiniMax download permit accepts only its no-watermark music MP3 once", async () => {
+  const webContents = new EventEmitter();
+  webContents.id = 142;
+  webContents.session = new EventEmitter();
+  webContents.getURL = () => "https://www.minimax.cn/audio/music";
+  webContents.getTitle = () => "MiniMax music";
+  webContents.isLoading = () => false;
+  webContents.isDestroyed = () => true;
+  webContents.debugger = { isAttached: () => false };
+  webContents.navigationHistory = { canGoBack: () => false, canGoForward: () => false };
+  const controller = new BrowserController(webContents, {
+    security: { maxSnapshotControls: 10, maxSnapshotHints: 5, contributionTargets: [] },
+  }, { downloadsDir: "/tmp" });
+  const url = "https://cdn.hailuoai.com/prod/2026-09-12-19/moss-audio/user_music/abc.mp3?download=1";
+  const item = (downloadUrl = url, filename = "跟我隻槳_no-watermark.mp3") => {
+    const value = new EventEmitter();
+    value.getURL = () => downloadUrl;
+    value.getFilename = () => filename;
+    value.getReceivedBytes = () => 0;
+    value.getTotalBytes = () => 123;
+    value.setSavePath = (pathValue) => { value.savedTo = pathValue; };
+    return value;
+  };
+  assert.equal(isMiniMaxMusicUrl(webContents.getURL()), true);
+  assert.equal(isMiniMaxMusicDownload(url, "跟我隻槳_no-watermark.mp3"), true);
+  assert.equal(isMiniMaxMusicDownload(url, "跟我隻槳.mp3"), false);
+  controller.armMiniMaxDownload({ principal: "kimi" });
+  const wrong = item("https://evil.example/abc.mp3?download=1");
+  assert.deepEqual(await controller.handleWillDownload(wrong, { id: 142 }), { handled: false });
+  assert.equal(wrong.savedTo, undefined);
+  const stale = item();
+  assert.deepEqual(await controller.handleWillDownload(stale, { id: 142 }), { handled: false });
+  controller.armMiniMaxDownload({ principal: "kimi" });
+  assert.equal(controller.isPermittedMiniMaxDownloadRequest(`${url}&filename=%E4%B8%96%E7%95%8C%E5%AD%A4%E5%AF%92_no-watermark.mp3`), true);
+  assert.equal(controller.isPermittedMiniMaxDownloadRequest("https://evil.example/file.mp3?download=1&filename=x_no-watermark.mp3"), false);
+  const good = item();
+  const result = await controller.handleWillDownload(good, { id: 142 });
+  assert.equal(result.handled, true);
+  assert.match(good.savedTo, /跟我隻槳_no-watermark(?: \(\d+\))?\.mp3$/);
+  assert.equal(controller.downloadStatus({ downloadId: result.downloadId, principal: "kimi" }).state, "in_progress");
+  assert.equal(controller.isPermittedMiniMaxDownloadRequest(`${url}&filename=x_no-watermark.mp3`), false);
+  assert.deepEqual(await controller.handleWillDownload(item(), { id: 142 }), { handled: false });
+  controller.armMiniMaxDownload({ principal: "kimi" });
+  const next = await controller.handleWillDownload(item(url, "下一首_no-watermark.mp3"), { id: 142 });
+  assert.equal(next.handled, true);
+  assert.notEqual(next.downloadId, result.downloadId);
+  assert.equal(controller.downloadStatus({ principal: "kimi" }).count, 2);
+  controller.close();
 });
 
 test("controller rejects CSS anchor as a security boundary", async () => {

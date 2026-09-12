@@ -1,5 +1,5 @@
 export const PRODUCT_NAME = "Agent Browser Local";
-export const VERSION = "0.3.0-beta.17";
+export const VERSION = "0.3.0-beta.19";
 
 export const CAPABILITIES = Object.freeze({
   STATUS: "browser.status",
@@ -9,6 +9,7 @@ export const CAPABILITIES = Object.freeze({
   SCROLL: "browser.scroll",
   CAPTURE_SERIES: "browser.capture.series",
   DOWNLOAD_STATUS: "browser.download.status",
+  MINIMAX_DOWNLOAD: "browser.download.minimax",
   CLICK: "browser.click.ref",
   CLICK_VISUAL: "browser.click.visual",
   FILL: "browser.fill.ref",
@@ -33,6 +34,7 @@ export const DEFAULT_CAPABILITIES = Object.freeze(
         CAPABILITIES.CREDITS_SUNO,
         CAPABILITIES.CAPTURE_SERIES,
         CAPABILITIES.DOWNLOAD_STATUS,
+        CAPABILITIES.MINIMAX_DOWNLOAD,
       ].includes(capability),
   ),
 );

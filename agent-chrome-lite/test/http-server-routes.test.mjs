@@ -73,3 +73,19 @@ test("unknown endpoints still return not_found", async (t) => {
   const body = await response.json();
   assert.equal(body.error.code, "not_found");
 });
+
+test("Ximalaya check and one-shot publish routes map to distinct daemon actions", async (t) => {
+  const port = PORT + 2;
+  const { api, calls } = serverFixture(port);
+  await api.listen();
+  t.after(() => api.close());
+  for (const endpoint of ["ximalaya-publish-check", "ximalaya-publish"]) {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/actions/${endpoint}`, {
+      method: "POST", headers: { authorization: `Bearer ${TOKEN}` },
+    });
+    assert.equal(response.status, 200);
+  }
+  assert.deepEqual(calls, [
+    "browser.inspectXimalayaPublish", "browser.clickXimalayaPublish",
+  ]);
+});

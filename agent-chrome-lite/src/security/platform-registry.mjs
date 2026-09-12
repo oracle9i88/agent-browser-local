@@ -78,6 +78,16 @@ const PLATFORM_REGISTRY = Object.freeze({
       }),
     ]),
   }),
+  minimax_music: Object.freeze({
+    label: "MiniMax 音乐作品",
+    evidence: "https://www.minimax.cn/audio/music",
+    contributionTargets: Object.freeze([
+      Object.freeze({
+        origin: "https://www.minimax.cn",
+        pathPrefixes: Object.freeze(["/audio/music"]),
+      }),
+    ]),
+  }),
   wechat_official: Object.freeze({
     label: "微信公众号",
     contributionTargets: Object.freeze([
@@ -200,7 +210,9 @@ export function isStatusTargetUrl(url) {
 }
 
 export const DEFAULT_PLATFORM_IDS = Object.freeze(
-  Object.keys(PLATFORM_REGISTRY).filter((platformId) => platformId !== "suno"),
+  Object.keys(PLATFORM_REGISTRY).filter(
+    (platformId) => !["suno", "minimax_music"].includes(platformId),
+  ),
 );
 export { HUMAN_ONLY_ACTIONS, PLATFORM_BACKLOG, PLATFORM_REGISTRY };
 

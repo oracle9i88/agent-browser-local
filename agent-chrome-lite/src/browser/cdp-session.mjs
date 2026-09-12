@@ -6,6 +6,21 @@ export class CdpSession {
     this.webContents = webContents;
     this.commandTimeoutMs = commandTimeoutMs;
     this.onFault = onFault;
+    this.childTargets = new Map();
+    this.trackingTargets = false;
+    this.onTargetMessage = (_event, method, params) => {
+      if (method === "Target.attachedToTarget" && params?.sessionId) {
+        this.childTargets.set(params.sessionId, params.targetInfo);
+      } else if (method === "Target.targetInfoChanged" && params?.targetInfo) {
+        for (const [sessionId, info] of this.childTargets) {
+          if (info?.targetId === params.targetInfo.targetId) {
+            this.childTargets.set(sessionId, params.targetInfo);
+          }
+        }
+      } else if (method === "Target.detachedFromTarget") {
+        this.childTargets.delete(params?.sessionId);
+      }
+    };
   }
 
   async attach() {
@@ -22,12 +37,30 @@ export class CdpSession {
     ]);
   }
 
-  async send(method, params = {}, { timeoutMs = this.commandTimeoutMs } = {}) {
+  async attachedFrames() {
+    if (!this.trackingTargets) {
+      this.webContents.debugger.on("message", this.onTargetMessage);
+      this.trackingTargets = true;
+    }
+    await this.send("Target.setAutoAttach", {
+      autoAttach: true,
+      waitForDebuggerOnStart: false,
+      flatten: true,
+    });
+    if (this.childTargets.size === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return [...this.childTargets]
+      .filter(([, info]) => info?.type === "iframe")
+      .map(([sessionId, info]) => ({ sessionId, url: info.url }));
+  }
+
+  async send(method, params = {}, { timeoutMs = this.commandTimeoutMs, sessionId } = {}) {
     if (!this.webContents.debugger.isAttached()) await this.attach();
     let timer;
     try {
       return await Promise.race([
-        this.webContents.debugger.sendCommand(method, params),
+        this.webContents.debugger.sendCommand(method, params, sessionId),
         new Promise((_, reject) => {
           timer = setTimeout(() => {
             const error = new Error(`Timed out running CDP command ${method}`);
@@ -65,6 +98,11 @@ export class CdpSession {
   }
 
   detach() {
+    if (this.trackingTargets) {
+      this.webContents.debugger.removeListener("message", this.onTargetMessage);
+    }
+    this.childTargets.clear();
+    this.trackingTargets = false;
     if (!this.webContents.isDestroyed() && this.webContents.debugger.isAttached()) {
       this.webContents.debugger.detach();
     }

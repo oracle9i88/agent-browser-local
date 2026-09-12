@@ -1,0 +1,6 @@
+{
+  "name": "agent-browser-frame-gold",
+  "private": true,
+  "type": "module",
+  "main": "../../scripts/electron-frame-gold.mjs"
+}

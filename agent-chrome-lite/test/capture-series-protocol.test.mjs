@@ -204,3 +204,34 @@ test("delegated Studio Multitrack click arms one Suno download permit", async ()
   assert.equal(clicked, true);
   assert.ok(events.some((entry) => entry.code === "studio_download_requires_finalize"));
 });
+
+test("MiniMax download click needs its own grant and arms only the no-watermark entry", async () => {
+  const events = [];
+  let armed = 0;
+  let clicked = 0;
+  let handoff = null;
+  const controller = {
+    status: () => ({ url: "https://www.minimax.cn/audio/music", handoff }),
+    resolveRef: () => ({ node: { role: "menuitem", name: "MP3(无水印)" } }),
+    armMiniMaxDownload: () => { armed += 1; return { permitId: "minimax-1" }; },
+    clickRef: async () => { clicked += 1; return { ok: true }; },
+    setHandoff: (reason, detail) => { handoff = { required: true, reason, detail }; return handoff; },
+  };
+  const daemon = new BrowserDaemon({
+    controller,
+    config: { security: { contributionTargets: [{ origin: "https://www.minimax.cn", pathPrefixes: ["/audio/music"] }] } },
+    executor: { run: (task) => task() },
+    audit: { record: async (entry) => events.push(entry) },
+  });
+  const identity = { principal: "kimi", capabilities: [CAPABILITIES.CLICK], confirmationPolicy: CONFIRMATION_POLICY };
+  await assert.rejects(daemon.dispatch(identity, "browser.click", { ref: "fresh:1" }),
+    (error) => error.code === "minimax_download_requires_local_grant");
+  assert.equal(clicked, 0);
+  assert.equal(armed, 0);
+  handoff = null;
+  identity.capabilities.push(CAPABILITIES.MINIMAX_DOWNLOAD);
+  await daemon.dispatch(identity, "browser.click", { ref: "fresh:1" });
+  assert.equal(armed, 1);
+  assert.equal(clicked, 1);
+  assert.equal(events.at(-1).event, "browser.click");
+});
