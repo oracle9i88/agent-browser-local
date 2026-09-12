@@ -36,6 +36,12 @@
 - 启动失败会显示本地错误窗口；页面故障会在工具栏显示红色状态，同时明确保留登录资料。
 - Google/Suno 登录不会在 Electron 内嵌窗口里反复尝试：迁移向导可打开使用独立持久 Profile 的 Chrome 会话桥；用户只在该 Chrome 完成 Google 登录，随后逐域授权 `suno.com` 与 `auth.suno.com` 同步。桥只读取 Suno/Clerk 最小白名单 Cookie，Google Cookie、密码、整份 Chrome Profile 均不读取。同步后程序必须以页面出现 Profile menu/credits 且 Log in 消失作为真实验收；仅有“Cookie 已注入”不能判定登录成功。
 
+## Genspark 试探记录（2026-09-13，未交付）
+
+- 同一台机器的日常 Chrome 可以打开已有 Genspark 会话；Macian 打开 `https://www.genspark.ai/ai_image` 则出现“登录或注册 / 使用 Google 继续”。这只证明两个浏览器的登录态未互通，不证明具体缺的是哪一种 Cookie 或站点存储。
+- 当前平台登记与登录态迁移均不包含 Genspark，Agent 因页面不在允许范围内进入接管状态；Genspark 生成、作品定位和下载均未在 Macian 验收，不能按 MiniMax 下载能力使用。
+- 本次没有读取或迁移 Google 凭据、Cookie 或浏览器存储，也没有要求用户重新登录。后续若立项，须先设计仅限 Genspark 域的会话交接与权限边界，并以实际登录标志和一件用户指定作品的下载落盘为验收标准；不得把“已注入 Cookie”当作登录成功。
+
 ## 明确不提供
 
 - 任意 JavaScript / DOM evaluate。
