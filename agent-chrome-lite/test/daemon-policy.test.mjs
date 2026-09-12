@@ -368,3 +368,90 @@ test("fill audit never copies content-derived accessibility names", async () => 
   assert.equal(events[0].name, undefined);
   assert.equal(events[0].value, secret);
 });
+
+function navigateFixture({ handoffCode } = {}) {
+  const events = [];
+  const controller = {
+    handoff: handoffCode
+      ? { required: true, reason: "需要用户接管", detail: { code: handoffCode } }
+      : null,
+    navigateCount: 0,
+    status() {
+      return { url: "https://outside.example/", handoff: this.handoff };
+    },
+    clearHandoff() {
+      this.handoff = null;
+    },
+    navigate: async function (url) {
+      this.navigateCount += 1;
+      this.handoff = null;
+      return { url };
+    },
+  };
+  const daemon = new BrowserDaemon({
+    controller,
+    config: {
+      security: {
+        uploadRoots: [],
+        contributionTargets: [
+          { origin: "https://example.test", pathPrefixes: ["/create"] },
+        ],
+      },
+    },
+    executor: { run: (task) => task() },
+    audit: { record: async (event) => events.push(event) },
+  });
+  const identity = {
+    principal: "glm",
+    capabilities: [CAPABILITIES.NAVIGATE],
+    confirmationPolicy: CONFIRMATION_POLICY,
+  };
+  return { controller, daemon, events, identity };
+}
+
+test("navigate auto-resumes an outside-contribution-scope handoff when the target is in scope", async () => {
+  const { controller, daemon, events, identity } = navigateFixture({
+    handoffCode: "outside_contribution_scope",
+  });
+
+  const result = await daemon.dispatch(identity, "browser.navigate", {
+    url: "https://example.test/create",
+  });
+
+  assert.equal(result.url, "https://example.test/create");
+  assert.equal(controller.navigateCount, 1);
+  assert.equal(controller.handoff, null);
+  assert.equal(events[0].event, "handoff.auto_resumed");
+  assert.equal(events[0].via, "browser.navigate");
+});
+
+test("navigate still blocks on handoffs that require human attention", async () => {
+  const { controller, daemon, identity } = navigateFixture({
+    handoffCode: "page_unavailable",
+  });
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.navigate", {
+      url: "https://example.test/create",
+    }),
+    (error) =>
+      error instanceof DaemonError &&
+      error.status === 409 &&
+      error.code === "handoff_pending",
+  );
+  assert.equal(controller.navigateCount, 0);
+});
+
+test("navigate to an out-of-scope target is rejected even with a pending scope handoff", async () => {
+  const { controller, daemon, identity } = navigateFixture({
+    handoffCode: "outside_contribution_scope",
+  });
+
+  await assert.rejects(
+    daemon.dispatch(identity, "browser.navigate", {
+      url: "https://outside.example/",
+    }),
+    (error) => error instanceof DaemonError && error.status === 403,
+  );
+  assert.equal(controller.navigateCount, 0);
+});
