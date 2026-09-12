@@ -242,3 +242,15 @@ npm run agent-permissions -- --revoke-suno-studio codex
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 
 本仓库当前未声明开源许可证。公开可见不等于获得复制、修改或再分发授权；许可证将在稳定版前另行确定。
+
+## 第三方产线集成与待解问题（song-factory，分支 feature/auth-check-status-targets）
+
+本分支为 song-factory 产线（`~/song-factory`）接入而做：登录态探活 `/v1/auth/check`、作品状态只读路径（`browser.verify.ref`）、冻结自愈 `/v1/handoff/clear`、媒体文件导航转下载、MiniMax Audio 与 GenSpark 白名单、GenSpark Cookie 同步。全部改动小步提交于该分支，main 未动。
+
+**待 Codex 解决的三个问题**（详细诊断、已排除项、证据路径、产线调用点）见仓库根目录 [HANDOFF-song-factory.md](../HANDOFF-song-factory.md)。摘要：
+
+1. **（阻塞）MiniMax 网页端作品下载无法自动化**：作品卡片不进 a11y 快照；↓ 打开格式菜单后点选无任何下载事件/导航/落盘。坐标系已排查，媒体导航拦截已加（站点不导航故未触发）。线索：卡片 ⋮ 菜单、抓包复刻下载请求、blob+saveAs 路径。
+2. **GenSpark 会话不可 Cookie 移植**（前端令牌在 localStorage，按契约不迁）：产线暂以用户授权的直接 CDP 驱动登录态桥 Chrome 绕行，已全自动。
+3. **（P2）快照不暴露二阶段表单控件**（抖音自主声明/简介/话题、快手全字段）：发布工位现以 humanFinalGate 人工兜底 30 秒收尾。
+
+协作约定：永不碰 main；冻结恢复是程序职责（clear-handoff 或重启），不要求人工点"交还 Agent"。
