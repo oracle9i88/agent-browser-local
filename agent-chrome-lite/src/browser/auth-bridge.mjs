@@ -13,12 +13,11 @@ const AUTH_COOKIE_NAMES = new Set([
 const AUTH_DOMAINS = new Set(["suno.com", "auth.suno.com", "app.suno.ai"]);
 
 // GenSpark 会话：实测为自管会话（非 Clerk），httpOnly 的 c2 是会话 Cookie，
-// from_auth 为 OAuth 回跳标记；按域过滤后仍只允许白名单名。
+// from_auth 为 OAuth 回跳标记；g_state 是 UI 状态不迁移。按域过滤 + 白名单名。
 const GENSPARK_AUTH_DOMAINS = new Set(["genspark.ai", "www.genspark.ai"]);
 const GENSPARK_AUTH_COOKIE_NAMES = new Set([
   "c2",
   "from_auth",
-  "g_state",
 ]);
 
 function normalizedDomain(value) {

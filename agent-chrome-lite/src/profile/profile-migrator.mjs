@@ -118,12 +118,16 @@ export const MIGRATION_PLATFORM_OFFERS = Object.freeze([
   {
     // 实测确认：GenSpark 自管会话，非 Clerk。httpOnly 的 c2 为会话 Cookie，
     // from_auth 为 OAuth 回跳标记；required 校验以 c2 为准。
+    // 实测确认：GenSpark 自管会话，非 Clerk。httpOnly 的 c2 为会话 Cookie，
+    // from_auth 为 OAuth 回跳标记；required 校验以 c2 为准。
+    // g_state 是 Google 按钮的 UI 状态（匿名浏览也会种），无登录语义，
+    // 不迁移——避免与 Agent 侧既有匿名 Cookie 触发覆盖保护而中止。
     platform: "genspark",
     label: "GenSpark",
     startUrl: "https://www.genspark.ai",
     domains: Object.freeze(["genspark.ai", "www.genspark.ai"]),
     requiredCookieNames: Object.freeze(["c2"]),
-    cookieNames: Object.freeze(["c2", "from_auth", "g_state"]),
+    cookieNames: Object.freeze(["c2", "from_auth"]),
   },
 ]);
 
