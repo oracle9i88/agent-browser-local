@@ -120,6 +120,21 @@ test("Studio Multitrack downloads use the finalize gate", () => {
   }
 });
 
+test("MiniMax no-watermark MP3 requires a MiniMax-specific local grant", () => {
+  const risk = classifyAction({
+    action: "click",
+    node: { role: "menuitem", name: "MP3(无水印)" },
+    url: "https://www.minimax.cn/audio/music",
+  });
+  assert.equal(risk.code, "minimax_download_requires_local_grant");
+  assert.equal(risk.delegableCapability, CAPABILITIES.MINIMAX_DOWNLOAD);
+  assert.deepEqual(classifyAction({
+    action: "click",
+    node: { role: "menuitem", name: "MP3(无水印)" },
+    url: "https://evil.example/audio/music",
+  }), { blocked: false });
+});
+
 test("Studio clip WAV download requires a real-user handoff", () => {
   const result = classifyAction({
     action: "click",

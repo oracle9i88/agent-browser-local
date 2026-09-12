@@ -1,8 +1,8 @@
 # Agent Browser Local
 
-供 Codex、Claude、NovaGe、NovaDe 共用的本地独立 Chromium 浏览器。它只负责把用户自己的内容送上平台，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
+供 Codex、Claude、NovaGe、NovaDe、Kimi 共用的本地独立 Chromium 浏览器。它以把用户自己的内容送上平台为主；MiniMax 仅额外允许逐首下载用户自己生成的音乐成品，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前代码：`v0.3.0-beta.18` 候选版（喜马拉雅嵌入页发布按钮待真实账号验收）。已有上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前代码：`v0.3.0-beta.19` 候选版（MiniMax 无水印 MP3 下载已在已登录账号验收；其他平台发布能力另行验收）。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
@@ -22,6 +22,7 @@
 - 投稿页提供受权限控制的 `browser.scroll`：支持有限的人类步长，也支持最多 12 步、逐步节流的 `bottom`；只读取视口几何，不读取或导出页面正文，方向/步幅进入审计。普通文档能可靠回报 `reachedEnd`；SPA 内层滚动容器无法从文档几何证明到底时会返回 `false`，由下一张截图复核，禁止假报成功。
 - `browser.captureSeries` 只在 Suno Studio 可用，并要求来自 60 秒内当前截图的视觉锚点；daemon 循环保存完整截图并滚动，以左侧轨道编号/名称栏的裁剪哈希判断进度，排除 Magic Bar 轮换提示等动画干扰。连续两次轨道栏不变才报告到底。截图写入 `~/.agent-browser-local/captures/<label>-<timestamp>/`，manifest 同时记录完整图片哈希、稳定判定哈希和不含查询串的页面地址。
 - Suno Studio 多轨本机导出使用一次性、15 秒短期许可：只有经 daemon 风险策略识别并审计的 `Export → Multitrack` 才能触发自动落盘；普通歌曲页 Download 不使用这条通道。片段 `Download .WAV` 及其系统保存流程由用户本人完成。`browser.downloadStatus` 返回 Agent 发起的多轨在飞/已完成记录。
+- MiniMax 音乐创作页在本机显式启用 `minimax_music`，且 principal 获得 `browser.download.minimax` 后，可对用户指定的现成作品逐首点击 `MP3(无水印)`。每次点击只放行一个来自 MiniMax 音乐 CDN 的无水印 MP3，自动写入 Downloads，`browser.downloadStatus` 回报完成状态；多个作品可以逐首重复，不是总次数限制。实测同名不同版本得到原名与 `(2)` 文件，均无需系统保存窗口；下载后不再误触发离开投稿范围接管。见 [MiniMax 下载 skill](skills/minimax-download/SKILL.md)。
 - 文件上传通过 Snapshot 找到原生文件输入；隐藏输入可从语义上传入口或 60 秒有效的当前截图动态按钮拦截 file chooser、核验最终原生节点，再调用 CDP `DOM.setFileInputFiles`。
 - 本地 daemon 只监听 `127.0.0.1`，HTTP/WS 均由 bearer token 认证。
 - principal、capabilities、confirmation policy 全部来自 daemon 本地配置；Agent 无权自报。
@@ -237,12 +238,15 @@ npm run agent-permissions -- --grant-finalize codex
 npm run agent-permissions -- --revoke-finalize codex
 npm run agent-permissions -- --grant-suno-studio codex
 npm run agent-permissions -- --revoke-suno-studio codex
+npm run platforms -- minimax_music
+npm run agent-permissions -- --grant-minimax-download kimi
+npm run agent-permissions -- --revoke-minimax-download kimi
 ```
 
 ## 发布状态
 
-- 最近已验证 tag：`v0.3.0-beta.17`；`beta.18` 当前仅为候选代码，真实喜马拉雅发布验收后再打 tag。
-- GitHub：`codex/scroll-beta12` 保存候选源码；tag 在打包和验收通过后固定审计提交。
+- 最近已验证 tag：`v0.3.0-beta.17`；`beta.19` 为 MiniMax 下载候选代码，真实账号下载已验收，其他平台发布能力不随此版本宣称验收。
+- GitHub：`codex/minimax-download-beta19` 保存本次源码与 Kimi skill；tag 在审计提交后另行固定。
 - 本地 macOS 包仍为 ad-hoc 签名；没有 Developer ID 公证，不作为公开二进制分发。
 - 安全问题请按 [SECURITY.md](SECURITY.md) 使用 GitHub Private Vulnerability Reporting 提交，避免在公开 Issue 中粘贴 token、Profile、账号页面或审计日志。
 

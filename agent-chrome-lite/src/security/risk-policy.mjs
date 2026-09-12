@@ -1,3 +1,5 @@
+import { CAPABILITIES } from "../constants.mjs";
+
 const finalizationWords = [
   /(^|\s)(publish|post|submit)(\s|$)/i,
   /创建(?:单集|歌曲)?|发布|发表|提交|上传(?:作品)?|立即发布/i,
@@ -43,6 +45,15 @@ function isSunoStudioUrl(url) {
       parsed.origin === "https://suno.com" &&
       (parsed.pathname === "/studio" || parsed.pathname.startsWith("/studio/"))
     );
+  } catch {
+    return false;
+  }
+}
+
+function isMiniMaxMusicUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.origin === "https://www.minimax.cn" && url.pathname === "/audio/music";
   } catch {
     return false;
   }
@@ -179,6 +190,14 @@ export function classifyAction({ action, node, url }) {
       blocked: true,
       code: "manual_auth_required",
       reason: "登录或验证入口已交给用户本人操作。",
+    };
+  }
+  if (isMiniMaxMusicUrl(url) && /^MP3\s*\(无水印\)(?:\s+MP3\s*\(无水印\))*$/i.test(textOf(node).trim())) {
+    return {
+      blocked: true,
+      code: "minimax_download_requires_local_grant",
+      reason: "MiniMax 无水印 MP3 下载需要本地权限表明确授权。",
+      delegableCapability: CAPABILITIES.MINIMAX_DOWNLOAD,
     };
   }
   if (matchesAny(text, legalWords) && ["checkbox", "switch"].includes(role)) {

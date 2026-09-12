@@ -417,7 +417,11 @@ async function createWindow(config) {
         });
       }
     },
-    onMainFrameEscape: (decision) => {
+    onMainFrameEscape: (decision, details) => {
+      // MiniMax's audited download briefly appears as a main-frame CDN
+      // request before Electron emits will-download. It is not a page escape.
+      // A real navigation still triggers controller.did-navigate and handoff.
+      if (controller.isPermittedMiniMaxDownloadRequest(details.url)) return;
       controller.setHandoff(decision.reason, { code: decision.code });
     },
   });

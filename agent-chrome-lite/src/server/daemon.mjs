@@ -348,6 +348,11 @@ export class BrowserDaemon {
               principal: identity.principal,
             });
           }
+          if (risk.code === "minimax_download_requires_local_grant") {
+            downloadPermit = this.controller.armMiniMaxDownload({
+              principal: identity.principal,
+            });
+          }
           let result;
           try {
             result = await this.controller.clickRef(params.ref, {
@@ -356,6 +361,7 @@ export class BrowserDaemon {
           } catch (error) {
             if (downloadPermit) {
               this.controller.disarmSunoDownload(downloadPermit.permitId);
+              this.controller.disarmMiniMaxDownload(downloadPermit.permitId);
             }
             throw error;
           }
@@ -403,6 +409,11 @@ export class BrowserDaemon {
               principal: identity.principal,
             });
           }
+          if (risk.code === "minimax_download_requires_local_grant") {
+            downloadPermit = this.controller.armMiniMaxDownload({
+              principal: identity.principal,
+            });
+          }
           let result;
           try {
             result = await this.controller.clickVisual(target.point, {
@@ -411,6 +422,7 @@ export class BrowserDaemon {
           } catch (error) {
             if (downloadPermit) {
               this.controller.disarmSunoDownload(downloadPermit.permitId);
+              this.controller.disarmMiniMaxDownload(downloadPermit.permitId);
             }
             throw error;
           }

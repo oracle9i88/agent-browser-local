@@ -33,6 +33,27 @@ export function isSunoStudioUrl(value) {
   }
 }
 
+export function isMiniMaxMusicUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.origin === "https://www.minimax.cn" && url.pathname === "/audio/music";
+  } catch {
+    return false;
+  }
+}
+
+export function isMiniMaxMusicDownload(urlValue, filename) {
+  try {
+    const url = new URL(urlValue);
+    return url.origin === "https://cdn.hailuoai.com" &&
+      /^\/prod\/[^/]+\/moss-audio\/user_music\/[^/]+\.mp3$/.test(url.pathname) &&
+      url.searchParams.get("download") === "1" &&
+      /_no-watermark\.mp3$/i.test(String(filename || ""));
+  } catch {
+    return false;
+  }
+}
+
 export function sanitizeDownloadFilename(input) {
   const base = path.basename(String(input || "").replaceAll("\\", "/"));
   const extension = path.extname(base).slice(0, 16);
@@ -203,6 +224,8 @@ export class BrowserController extends EventEmitter {
     this.downloadCounter = 0;
     this.sunoDownloadPermit = null;
     this.sunoDownloadPermitTimer = null;
+    this.miniMaxDownloadPermit = null;
+    this.miniMaxDownloadPermitTimer = null;
 
     const reconcileContributionScope = (url) => {
       const transition = contributionScopeTransition(
@@ -328,9 +351,64 @@ export class BrowserController extends EventEmitter {
     return permit;
   }
 
+  armMiniMaxDownload({ principal, ttlMs = DOWNLOAD_PERMIT_TTL_MS } = {}) {
+    const pageUrl = this.webContents.getURL();
+    if (!isMiniMaxMusicUrl(pageUrl)) {
+      const error = new Error("MiniMax downloads can only be armed from the music page");
+      error.code = "minimax_music_required";
+      throw error;
+    }
+    const permit = {
+      permitId: randomUUID(),
+      principal: String(principal || ""),
+      pageUrl,
+      expiresAt: Date.now() + Math.max(1_000, Math.min(30_000, Number(ttlMs) || DOWNLOAD_PERMIT_TTL_MS)),
+    };
+    this.disarmMiniMaxDownload();
+    this.miniMaxDownloadPermit = permit;
+    this.miniMaxDownloadPermitTimer = setTimeout(() => {
+      this.disarmMiniMaxDownload(permit.permitId);
+    }, permit.expiresAt - Date.now());
+    this.miniMaxDownloadPermitTimer.unref?.();
+    return { permitId: permit.permitId, expiresAt: permit.expiresAt };
+  }
+
+  disarmMiniMaxDownload(permitId) {
+    if (permitId && this.miniMaxDownloadPermit?.permitId !== permitId) return;
+    this.miniMaxDownloadPermit = null;
+    if (this.miniMaxDownloadPermitTimer) clearTimeout(this.miniMaxDownloadPermitTimer);
+    this.miniMaxDownloadPermitTimer = null;
+  }
+
+  consumeMiniMaxDownloadPermit(sourceContents, item) {
+    const permit = this.miniMaxDownloadPermit;
+    this.disarmMiniMaxDownload();
+    if (!permit || permit.expiresAt < Date.now()) return null;
+    if (!isMiniMaxMusicUrl(this.webContents.getURL()) ||
+        this.webContents.getURL() !== permit.pageUrl ||
+        !sourceContents || sourceContents.id !== this.webContents.id ||
+        !isMiniMaxMusicDownload(item.getURL?.(), item.getFilename?.())) return null;
+    return permit;
+  }
+
+  isPermittedMiniMaxDownloadRequest(url) {
+    const permit = this.miniMaxDownloadPermit;
+    if (!permit || permit.expiresAt < Date.now() ||
+        !isMiniMaxMusicUrl(this.webContents.getURL()) ||
+        this.webContents.getURL() !== permit.pageUrl) return false;
+    try {
+      const parsed = new URL(url);
+      return isMiniMaxMusicDownload(url, parsed.searchParams.get("filename"));
+    } catch {
+      return false;
+    }
+  }
+
   async handleWillDownload(item, sourceContents) {
-    const permit = this.consumeSunoDownloadPermit(sourceContents);
-    // No audited, one-shot Suno permit: leave Electron's normal human download
+    const permit = isMiniMaxMusicUrl(this.webContents.getURL())
+      ? this.consumeMiniMaxDownloadPermit(sourceContents, item)
+      : this.consumeSunoDownloadPermit(sourceContents);
+    // No audited, one-shot platform permit: leave Electron's normal human download
     // handling untouched. In particular, never silently choose a save path.
     if (!permit) return { handled: false };
     this.downloadCounter += 1;
@@ -1220,6 +1298,7 @@ export class BrowserController extends EventEmitter {
 
   close() {
     this.disarmSunoDownload();
+    this.disarmMiniMaxDownload();
     this.cdp.detach();
   }
 }

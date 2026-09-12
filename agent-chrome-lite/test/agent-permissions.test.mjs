@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   updateFinalizeCapability,
   updateSunoStudioCapabilities,
+  updateMiniMaxDownloadCapabilities,
 } from "../scripts/agent-permissions.mjs";
 import { CAPABILITIES } from "../src/constants.mjs";
 
@@ -45,4 +46,24 @@ test("local permission manager grants Suno Studio capabilities to one principal"
   updateSunoStudioCapabilities(value, "claude", false);
   assert.equal(value.agents[1].capabilities.includes(CAPABILITIES.CAPTURE_SERIES), false);
   assert.equal(value.agents[1].capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS), false);
+});
+
+test("MiniMax download permission is opt-in for one principal", () => {
+  const value = updateMiniMaxDownloadCapabilities(config(), "claude", true);
+  assert.equal(value.agents[0].capabilities.includes(CAPABILITIES.MINIMAX_DOWNLOAD), false);
+  assert.equal(value.agents[1].capabilities.includes(CAPABILITIES.MINIMAX_DOWNLOAD), true);
+  assert.equal(value.agents[1].capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS), true);
+  updateMiniMaxDownloadCapabilities(value, "claude", false);
+  assert.equal(value.agents[1].capabilities.includes(CAPABILITIES.MINIMAX_DOWNLOAD), false);
+});
+
+test("revoking one platform retains download status needed by the other", () => {
+  const value = config();
+  updateSunoStudioCapabilities(value, "codex", true);
+  updateMiniMaxDownloadCapabilities(value, "codex", true);
+  updateMiniMaxDownloadCapabilities(value, "codex", false);
+  assert.equal(value.agents[0].capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS), true);
+  updateMiniMaxDownloadCapabilities(value, "codex", true);
+  updateSunoStudioCapabilities(value, "codex", false);
+  assert.equal(value.agents[0].capabilities.includes(CAPABILITIES.DOWNLOAD_STATUS), true);
 });
