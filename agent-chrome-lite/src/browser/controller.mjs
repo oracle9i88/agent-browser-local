@@ -455,6 +455,19 @@ export class BrowserController extends EventEmitter {
     };
   }
 
+  /** 清空指定 origin 的前端存储（localStorage 等，保留 Cookie）。finalize 级运维操作。 */
+  async clearSiteData(origin) {
+    const parsed = new URL(String(origin || ""));
+    if (parsed.protocol !== "https:" || !parsed.hostname) {
+      throw new Error("clearSiteData requires an https origin");
+    }
+    await this.webContents.session.clearStorageData({
+      origins: [`${parsed.origin}`],
+      storages: ["localstorage", "serviceworkers", "cachestorage", "indexdb"],
+    });
+    return { cleared: parsed.origin, cookiesPreserved: true };
+  }
+
   assertPageAvailable() {
     this.pageHealth.assertAvailable();
   }

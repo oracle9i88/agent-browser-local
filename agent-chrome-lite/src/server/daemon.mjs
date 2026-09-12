@@ -217,6 +217,19 @@ export class BrowserDaemon {
         return { platform, ...result };
       }
 
+      case "browser.clearSiteData": {
+        // 运维：清空某 https origin 的前端存储（保留 Cookie），解决迁移后旧
+        // localStorage 遮蔽新 Cookie 的问题。
+        this.requireCapability(identity, CAPABILITIES.FINALIZE);
+        const result = await this.controller.clearSiteData(params.origin);
+        await this.audit.record({
+          event: "browser.clearSiteData",
+          principal: identity.principal,
+          origin: result.cleared,
+        });
+        return result;
+      }
+
       case "browser.navigate": {
         this.requireCapability(identity, CAPABILITIES.NAVIGATE);
         this.requireContributionPage(params.url, identity);
