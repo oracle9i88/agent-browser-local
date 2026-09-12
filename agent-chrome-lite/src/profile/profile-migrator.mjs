@@ -300,8 +300,9 @@ async function collectPlatformCookies(offer, domains, cdp) {
     (name) => !injected.some((cookie) => cookie.name === name),
   );
   if (missing.length > 0) {
+    const foundNames = [...new Set(injected.map((cookie) => cookie.name))].join(", ") || "无";
     throw sanitizedError(
-      `迁移向导：${offer.label} 同步前验证未通过（Chrome 中未找到登录会话 Cookie）。请确认已在 Chrome 中完成登录`,
+      `迁移向导：${offer.label} 同步前验证未通过（缺: ${missing.join(", ")}；Chrome 中白名单命中的 Cookie: ${foundNames}）。请确认已在 Chrome 中完成登录，且目标标签页仍打开`,
       `${offer.platform}_precheck_failed`,
     );
   }
