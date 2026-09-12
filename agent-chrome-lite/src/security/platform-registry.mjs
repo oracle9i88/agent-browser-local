@@ -150,6 +150,16 @@ const PLATFORM_REGISTRY = Object.freeze({
       }),
     ]),
   }),
+  genspark: Object.freeze({
+    label: "GenSpark",
+    evidence: "https://www.genspark.ai",
+    contributionTargets: Object.freeze([
+      Object.freeze({
+        origin: "https://www.genspark.ai",
+        pathPrefixes: Object.freeze(["/"]),
+      }),
+    ]),
+  }),
 });
 
 // Read-only post-status pages. Navigable only by principals holding the
