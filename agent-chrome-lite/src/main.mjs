@@ -22,6 +22,7 @@ import { ContributionPopupRouter } from "./browser/popup-router.mjs";
 import { classifyExternalAuthUrl } from "./browser/external-auth.mjs";
 import { createSpaceManager, DEFAULT_SPACE_ID } from "./browser/space-manager.mjs";
 import { createTabOwnership } from "./browser/tab-ownership.mjs";
+import { WorkspaceRouter } from "./browser/workspace-router.mjs";
 import {
   assertNoElectronBrand,
   buildChromiumUserAgent,
@@ -66,6 +67,8 @@ let spaceManager;
 let defaultSpace;
 let browsingSession;
 let tabOwnership;
+const workspaces = new WorkspaceRouter();
+let migrationPanelOpen = false;
 
 function startupErrorMessage(error) {
   if (error?.code === "EADDRINUSE") {
@@ -96,6 +99,7 @@ async function openPendingExternalAuth({ auto = false } = {}) {
     throw new Error("当前没有等待外部浏览器认证的页面");
   }
   const auth = pendingExternalAuth;
+  const authController = workspaces.active()?.controller;
   if (
     auto &&
     lastAutoOpenedExternalAuth?.url === auth.url &&
@@ -118,7 +122,7 @@ async function openPendingExternalAuth({ auto = false } = {}) {
       browser: launch.browser,
     };
   } catch (error) {
-    controller?.setHandoff(
+    authController?.setHandoff(
       "无法自动打开系统 Chrome。请手动打开 Chrome，再访问登录页完成认证。",
       {
         code: "external_auth_open_failed",
@@ -214,10 +218,15 @@ function installApplicationMenu() {
   );
 }
 
-function hardenUntrustedWebContents(webContents) {
+function hardenUntrustedWebContents(webContents, owner) {
+  tabOwnership.bind(webContents.id, owner.space.id);
   webContents.setUserAgent(browserUserAgent);
   webContents.on("will-navigate", (event, url) => {
-    handleExternalAuthNavigation(url, { event });
+    if (workspaces.activeId === owner.space.id) handleExternalAuthNavigation(url, { event });
+    else if (classifyExternalAuthUrl(url)) {
+      event.preventDefault();
+      owner.controller.setHandoff("请切换到此工作空间后完成登录", { code: "user_takeover" });
+    }
   });
   webContents.on("context-menu", (_event, params) => {
     const items = [];
@@ -239,15 +248,20 @@ function hardenUntrustedWebContents(webContents) {
       Menu.buildFromTemplate(items).popup();
     }
   });
-  egressPolicy.register(webContents);
+  owner.egressPolicy.register(webContents);
   webContents.setWindowOpenHandler(({ url }) => {
-    if (handleExternalAuthNavigation(url)) return { action: "deny" };
-    if (popupRouter?.route(url)) return { action: "deny" };
+    if (classifyExternalAuthUrl(url)) {
+      if (workspaces.activeId === owner.space.id) handleExternalAuthNavigation(url);
+      else owner.controller.setHandoff("请切换到此工作空间后完成登录", { code: "user_takeover" });
+      return { action: "deny" };
+    }
+    if (owner.popupRouter?.route(url)) return { action: "deny" };
     return {
       action: "allow",
       overrideBrowserWindowOptions: {
         autoHideMenuBar: true,
         webPreferences: {
+          partition: `persist:${owner.space.partition}`,
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: true,
@@ -259,10 +273,14 @@ function hardenUntrustedWebContents(webContents) {
     };
   });
   webContents.on("did-create-window", (childWindow) => {
-    hardenUntrustedWebContents(childWindow.webContents);
+    hardenUntrustedWebContents(childWindow.webContents, owner);
     const routeChild = (event, url) => {
-      if (handleExternalAuthNavigation(url, { event, childWindow })) return;
-      if (!popupRouter?.route(url, { close: () => childWindow.close() })) return;
+      if (classifyExternalAuthUrl(url)) {
+        if (workspaces.activeId === owner.space.id) handleExternalAuthNavigation(url, { event, childWindow });
+        else { event?.preventDefault?.(); childWindow.close(); }
+        return;
+      }
+      if (!owner.popupRouter?.route(url, { close: () => childWindow.close() })) return;
       event?.preventDefault?.();
     };
     childWindow.webContents.on("will-navigate", routeChild);
@@ -273,7 +291,7 @@ function hardenUntrustedWebContents(webContents) {
 function layoutContent() {
   if (!mainWindow || !contentView) return;
   const [width, height] = mainWindow.getContentSize();
-  contentView.setBounds({ x: 0, y: 64, width, height: Math.max(0, height - 64) });
+  contentView.setBounds({ x: 0, y: 104, width, height: Math.max(0, height - 104) });
 }
 
 function sendState() {
@@ -392,12 +410,14 @@ async function createWindow(config) {
   mainWindow.on("resize", layoutContent);
   layoutContent();
 
-  controller = new BrowserController(contentView.webContents, config);
+  const pageController = new BrowserController(contentView.webContents, config);
+  workspaces.add({ space: defaultSpace, view: contentView, controller: pageController, session: browsingSession });
+  controller = workspaces.controller;
   popupRouter = new ContributionPopupRouter(config, {
-    navigate: (url) => controller.navigate(url),
+    navigate: (url) => pageController.navigate(url),
     onRouted: sendState,
     onError: () => {
-      controller.setHandoff(
+      pageController.setHandoff(
         "投稿编辑器弹窗接回主窗口失败，自动化已冻结，等待用户决定。",
         { code: "contribution_popup_route_failed" },
       );
@@ -411,7 +431,7 @@ async function createWindow(config) {
         `Blocked untrusted page request: ${decision.code} (${details.resourceType})`,
       );
       if (details.resourceType === "mainFrame") {
-        controller.setHandoff(decision.reason, {
+        pageController.setHandoff(decision.reason, {
           code: "unsafe_page_request",
           policyCode: decision.code,
         });
@@ -421,11 +441,12 @@ async function createWindow(config) {
       // MiniMax's audited download briefly appears as a main-frame CDN
       // request before Electron emits will-download. It is not a page escape.
       // A real navigation still triggers controller.did-navigate and handoff.
-      if (controller.isPermittedMiniMaxDownloadRequest(details.url)) return;
-      controller.setHandoff(decision.reason, { code: decision.code });
+      if (pageController.isPermittedMiniMaxDownloadRequest(details.url)) return;
+      pageController.setHandoff(decision.reason, { code: decision.code });
     },
   });
-  hardenUntrustedWebContents(contentView.webContents);
+  Object.assign(workspaces.active(), { egressPolicy, popupRouter });
+  hardenUntrustedWebContents(contentView.webContents, workspaces.active());
   controller.on("state", sendState);
   controller.on("handoff", sendState);
 
@@ -438,6 +459,10 @@ async function createWindow(config) {
   }
   await controller.initialize();
   await controller.navigate(config.browser.startUrl || "about:blank");
+  for (const space of await spaceManager.listSpaces()) {
+    if (space.id !== defaultSpace.id) await openWorkspace(space, config);
+  }
+  if (process.env.ABL_SMOKE_HEADLESS === "1") await verifyWorkspacesInSmoke();
   sendState();
   const expectedHandoff = Boolean(controller.status().handoff?.required);
   const toolbarReady = await waitForToolbarChange("本地安全模式");
@@ -467,63 +492,141 @@ async function createWindow(config) {
   }
 }
 
+async function verifyWorkspacesInSmoke() {
+  const original = workspaces.active();
+  const url = "https://workspace-test.invalid";
+  await original.session.cookies.set({ url, name: "abl_workspace_smoke", value: "test", secure: true });
+  try {
+    for (const id of ["publishing", "music"]) {
+      switchWorkspace(id);
+      if ((await browsingSession.cookies.get({ url })).length) throw new Error("Space Cookie isolation failed");
+      if (original.view.getVisible() || !contentView.getVisible()) throw new Error("Space visibility isolation failed");
+    }
+    switchWorkspace(original.space.id);
+    if ((await browsingSession.cookies.get({ url })).length !== 1) throw new Error("Original login partition was lost");
+    sendState();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const controls = await mainWindow.webContents.executeJavaScript('document.querySelectorAll("#spaces button").length');
+    if (controls < 3) throw new Error("Space switching UI missing");
+    console.log("Workspace smoke: original partition preserved, isolated cookies, switches and UI passed");
+  } finally {
+    await original.session.cookies.remove(url, "abl_workspace_smoke");
+  }
+}
+
+async function openWorkspace(space, config) {
+  const browserSession = spaceManager.sessionFor(space);
+  browserSession.setUserAgent(browserUserAgent, "zh-CN,zh;q=0.9,en;q=0.8");
+  const view = new WebContentsView({ webPreferences: {
+    partition: `persist:${space.partition}`, contextIsolation: true,
+    nodeIntegration: false, sandbox: true, backgroundThrottling: false,
+    webSecurity: true, allowRunningInsecureContent: false, safeDialogs: true,
+  } });
+  const page = new BrowserController(view.webContents, config);
+  const owner = { space, view, controller: page, session: browserSession };
+  owner.popupRouter = new ContributionPopupRouter(config, {
+    navigate: (url) => page.navigate(url), onRouted: sendState,
+    onError: () => page.setHandoff("投稿弹窗接回失败，等待用户处理", { code: "contribution_popup_route_failed" }),
+  });
+  owner.egressPolicy = installNetworkEgressPolicy({
+    browserSession, config,
+    onBlocked: (decision, details) => {
+      if (details.resourceType === "mainFrame") page.setHandoff(decision.reason, { code: "unsafe_page_request" });
+    },
+    onMainFrameEscape: (decision, details) => {
+      if (!page.isPermittedMiniMaxDownloadRequest(details.url)) page.setHandoff(decision.reason, { code: decision.code });
+    },
+  });
+  tabOwnership.bind(view.webContents.id, space.id);
+  hardenUntrustedWebContents(view.webContents, owner);
+  mainWindow.contentView.addChildView(view);
+  view.setVisible(false);
+  await page.initialize();
+  workspaces.add(owner);
+}
+
+function switchWorkspace(id) {
+  if (migrationPanelOpen) throw new Error("请先关闭迁移向导再切换工作空间");
+  const previous = workspaces.active();
+  const target = workspaces.select(id);
+  previous.auth = { pendingExternalAuth, lastAutoOpenedExternalAuth };
+  previous.view.setVisible(false);
+  contentView = target.view;
+  browsingSession = target.session;
+  egressPolicy = target.egressPolicy;
+  popupRouter = target.popupRouter;
+  pendingExternalAuth = target.auth?.pendingExternalAuth || null;
+  lastAutoOpenedExternalAuth = target.auth?.lastAutoOpenedExternalAuth || null;
+  contentView.setVisible(true);
+  layoutContent();
+  sendState();
+  return runtimeState();
+}
+
 function installIpc() {
-  ipcMain.handle("browser:status", () => runtimeState());
-  ipcMain.handle("browser:navigate", (_event, url) => {
+  const handle = (channel, fn) => ipcMain.handle(channel, (...args) => {
+    if (["browser:status", "browser:switch-space", "browser:request-user-handoff", "migration:set-open", "migration:offers", "migration:spaces", "migration:detect"].includes(channel)) return fn(...args);
+    return workspaces.run(() => fn(...args));
+  });
+  handle("browser:switch-space", (_event, id) => switchWorkspace(id));
+  handle("browser:status", () => runtimeState());
+  handle("browser:navigate", (_event, url) => {
     resetExternalAuthState();
     return controller.navigate(url);
   });
-  ipcMain.handle("browser:back", () => {
+  handle("browser:back", () => {
     resetExternalAuthState();
     return controller.back();
   });
-  ipcMain.handle("browser:forward", () => {
+  handle("browser:forward", () => {
     resetExternalAuthState();
     return controller.forward();
   });
-  ipcMain.handle("browser:reload", () => controller.reload());
-  ipcMain.handle("browser:recover", () => controller.reload());
-  ipcMain.handle("browser:open-external-auth", () => openPendingExternalAuth());
-  ipcMain.handle("browser:sync-external-auth", () => syncPendingExternalAuth());
-  ipcMain.handle("browser:request-user-handoff", () =>
+  handle("browser:reload", () => controller.reload());
+  handle("browser:recover", () => controller.reload());
+  handle("browser:open-external-auth", () => openPendingExternalAuth());
+  handle("browser:sync-external-auth", () => syncPendingExternalAuth());
+  handle("browser:request-user-handoff", () =>
     controller.setHandoff("用户已主动接管，Agent 自动化已暂停。", {
       code: "user_takeover",
     }),
   );
-  ipcMain.handle("browser:clear-handoff", () => {
+  handle("browser:clear-handoff", () => {
     resetExternalAuthState();
     return controller.clearHandoff();
   });
   // 迁移向导：仅由用户在 UI 中显式触发；daemon/Agent 没有任何调用路径。
-  ipcMain.handle("migration:detect", () => detectChromeProfiles());
-  ipcMain.handle("migration:offers", () => listMigrationOffers());
-  ipcMain.handle("migration:spaces", () => spaceManager.listSpaces());
-  ipcMain.handle("migration:open-bridge", () =>
+  handle("migration:detect", () => detectChromeProfiles());
+  handle("migration:offers", () => listMigrationOffers());
+  handle("migration:spaces", () => spaceManager.listSpaces());
+  handle("migration:open-bridge", () =>
     openChromeSessionBridge({
       endpoint: process.env.ABL_CHROME_CDP_URL || "http://127.0.0.1:9222",
       profileDir: path.join(runtimeDir, "chrome-session-bridge"),
     }),
   );
-  ipcMain.handle("migration:set-open", (_event, open) => {
+  handle("migration:set-open", (_event, open) => {
     // WebContentsView is composited above BrowserWindow HTML. Hide it while
     // the trusted toolbar migration panel is open, otherwise the panel exists
     // in the DOM but is visually covered by the page below y=64.
-    contentView?.setVisible(!Boolean(open));
+    migrationPanelOpen = Boolean(open);
+    contentView?.setVisible(!migrationPanelOpen);
     return { open: Boolean(open) };
   });
-  ipcMain.handle("migration:run", (_event, selectedDomains) =>
+  handle("migration:run", (_event, selectedDomains) =>
     runLoginMigration({
       selectedDomains,
       cookieStore: browsingSession.cookies,
       manifestStore: migrationManifests,
-      space: defaultSpace,
+      space: workspaces.active().space,
     }),
   );
-  ipcMain.handle("migration:rollback", (_event, migrationId) =>
+  handle("migration:rollback", (_event, migrationId) =>
     rollbackLoginMigration({
       migrationId: typeof migrationId === "string" ? migrationId : undefined,
       cookieStore: browsingSession.cookies,
       manifestStore: migrationManifests,
+      spaceId: workspaces.activeId,
     }),
   );
 }
@@ -546,6 +649,8 @@ if (!singleInstance) {
         sessionFactory: (name) => session.fromPartition(name),
       });
       await spaceManager.ensureDefaultSpace();
+      await spaceManager.ensureSpace("publishing", "自媒体发布");
+      await spaceManager.ensureSpace("music", "音乐创作");
       defaultSpace = await spaceManager.getSpace(DEFAULT_SPACE_ID);
       browsingSession = spaceManager.sessionFor(defaultSpace);
       tabOwnership = createTabOwnership({ defaultSpaceId: defaultSpace.id });
@@ -553,6 +658,7 @@ if (!singleInstance) {
       try {
         const recovery = await recoverPendingMigrations({
           cookieStore: browsingSession.cookies,
+          cookieStoreForSpace: async (space) => spaceManager.sessionFor(await spaceManager.getSpace(space.id)).cookies,
           manifestStore: migrationManifests,
         });
         if (recovery.entries > 0) {
@@ -575,6 +681,10 @@ if (!singleInstance) {
       });
       const audit = new AuditLog(path.join(runtimeDir, "audit", "events.jsonl"));
       const daemon = new BrowserDaemon({ controller, config, executor, audit });
+      const dispatch = daemon.dispatch.bind(daemon);
+      daemon.dispatch = (identity, method, params = {}) => workspaces.run(
+        () => dispatch(identity, method, params), params.spaceId,
+      );
       api = createApiServer({ daemon, config, controller });
       const toolbarBeforeReady = await mainWindow.webContents.executeJavaScript(
         'document.querySelector("#agent-state")?.textContent || ""',
@@ -636,7 +746,7 @@ if (!singleInstance) {
 app.on("before-quit", async () => {
   daemonReady = false;
   popupRouter = null;
-  controller?.close();
+  for (const entry of workspaces.entries.values()) entry.controller.close();
   if (api) await api.close().catch(() => undefined);
 });
 

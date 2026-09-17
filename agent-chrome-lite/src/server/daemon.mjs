@@ -35,7 +35,8 @@ export class BrowserDaemon {
     this.controller.on?.("download", (entry) => {
       void this.audit.record({
         ...entry,
-        url: safeUrl(this.controller.status().url),
+        sourceUrl: undefined,
+        url: safeUrl(entry.sourceUrl || this.controller.status().url),
       }).catch(() => undefined);
     });
   }

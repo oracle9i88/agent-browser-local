@@ -604,10 +604,12 @@ export async function rollbackLoginMigration({
   migrationId,
   cookieStore,
   manifestStore,
+  spaceId,
 } = {}) {
   const document = await manifestStore.load();
   const entries = document.entries.filter(
-    (entry) => !entry.rolledBackAt && entry.status !== "rolled_back",
+    (entry) => !entry.rolledBackAt && entry.status !== "rolled_back" &&
+      (!spaceId || (entry.space?.id || "default") === spaceId),
   );
   if (entries.length === 0) {
     throw sanitizedError("迁移向导：没有可回滚的迁移记录", "nothing_to_rollback");
@@ -666,6 +668,7 @@ export async function rollbackLoginMigration({
  */
 export async function recoverPendingMigrations({
   cookieStore,
+  cookieStoreForSpace,
   manifestStore,
   now = () => new Date().toISOString(),
 } = {}) {
@@ -674,7 +677,7 @@ export async function recoverPendingMigrations({
   }
   const document = await manifestStore.load();
   const pending = document.entries.filter(
-    (entry) => entry.status === "pending" || (!entry.status && !entry.rolledBackAt && !entry.committedAt),
+    (entry) => entry.status === "pending" || (entry.rollbackFailed && entry.status !== "rolled_back") || (!entry.status && !entry.rolledBackAt && !entry.committedAt),
   );
   let removed = 0;
   let failed = 0;
@@ -685,7 +688,10 @@ export async function recoverPendingMigrations({
         listed.push(cookie);
       }
     }
-    const rollback = await rollbackInjectedCookies(cookieStore, listed);
+    const targetStore = cookieStoreForSpace
+      ? await cookieStoreForSpace(entry.space || { id: "default" })
+      : cookieStore;
+    const rollback = await rollbackInjectedCookies(targetStore, listed);
     removed += rollback.succeeded;
     failed += rollback.failed;
     if (rollback.failed === 0) {

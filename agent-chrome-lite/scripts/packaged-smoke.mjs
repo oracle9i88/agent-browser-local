@@ -111,6 +111,9 @@ try {
   if (firstExit !== 0) {
     throw new Error(`Packaged app exited with code ${firstExit}`);
   }
+  if (!first.capturedOutput.join("").includes("Workspace smoke: original partition preserved, isolated cookies, switches and UI passed")) {
+    throw new Error("Packaged workspace smoke did not complete");
+  }
 
   const config = JSON.parse(
     await readFile(path.join(runtimeDir, "config.json"), "utf8"),
@@ -126,6 +129,7 @@ try {
         profile: "temporary",
         accountPagesOpened: false,
         releaseManifestVerified: true,
+        workspaceIsolationVerified: true,
       },
       null,
       2,

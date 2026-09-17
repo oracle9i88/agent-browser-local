@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("agentBrowser", {
   status: () => ipcRenderer.invoke("browser:status"),
+  switchSpace: (id) => ipcRenderer.invoke("browser:switch-space", id),
   navigate: (url) => ipcRenderer.invoke("browser:navigate", url),
   back: () => ipcRenderer.invoke("browser:back"),
   forward: () => ipcRenderer.invoke("browser:forward"),

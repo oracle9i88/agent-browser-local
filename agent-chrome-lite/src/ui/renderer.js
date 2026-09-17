@@ -9,8 +9,20 @@ const externalAuthSync = document.querySelector("#external-auth-sync");
 const recovery = document.querySelector("#recovery");
 const agentState = document.querySelector("#agent-state");
 const securityDot = document.querySelector("#security-dot");
+const spaces = document.querySelector("#spaces");
 
 function render(state) {
+  spaces.replaceChildren(...(state.spaces || []).map((space) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = space.id === "default" ? "原有登录态" : space.label;
+    button.setAttribute("aria-pressed", String(space.id === state.spaceId));
+    button.addEventListener("click", async () => {
+      try { render(await window.agentBrowser.switchSpace(space.id)); }
+      catch (error) { agentState.textContent = String(error.message || error).slice(0, 180); }
+    });
+    return button;
+  }));
   if (document.activeElement !== address) address.value = state.url || "";
   back.disabled = !state.canGoBack;
   forward.disabled = !state.canGoForward;

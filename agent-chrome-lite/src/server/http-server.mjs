@@ -82,6 +82,7 @@ function errorPayload(error) {
 
 function errorStatus(error) {
   if (error instanceof DaemonError) return error.status;
+  if (["workspace_busy", "workspace_changed"].includes(error?.code)) return 409;
   if (["stale_ref", "stale_visual_ref"].includes(error?.code)) return 409;
   if (["invalid_visual_anchor"].includes(error?.code)) return 400;
   if (["ximalaya_upload_required"].includes(error?.code)) return 403;
@@ -115,7 +116,10 @@ export function createApiServer({ daemon, config, controller }) {
       if (!route) throw new DaemonError(404, "not_found", "Endpoint not found");
       const [method, paramsFromBody] = route;
       const body = req.method === "POST" ? await bodyJson(req) : {};
-      const result = await daemon.dispatch(identity, method, paramsFromBody(body));
+      const result = await daemon.dispatch(identity, method, {
+        ...paramsFromBody(body),
+        ...(body.spaceId !== undefined ? { spaceId: body.spaceId } : {}),
+      });
       return json(res, 200, { ok: true, result });
     } catch (error) {
       return json(res, errorStatus(error), errorPayload(error));

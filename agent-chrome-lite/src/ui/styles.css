@@ -13,6 +13,10 @@ body {
   color: #f5f7fb;
 }
 
+.spaces { height: 40px; display: flex; gap: 8px; align-items: center; padding: 0 14px; }
+.spaces button { font-size: 13px; padding: 0 12px; height: 30px; }
+.spaces button[aria-pressed="true"] { background: #274736; color: #77e2a8; border-color: #5aa77b; }
+
 .toolbar {
   height: 64px;
   display: flex;

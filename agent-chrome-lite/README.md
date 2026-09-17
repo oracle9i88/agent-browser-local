@@ -2,7 +2,19 @@
 
 供 Codex、Claude、NovaGe、NovaDe、Kimi 共用的本地独立 Chromium 浏览器。它以把用户自己的内容送上平台为主；MiniMax 仅额外允许逐首下载用户自己生成的音乐成品，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前代码：`v0.3.0-beta.19` 候选版（MiniMax 无水印 MP3 下载已在已登录账号验收；其他平台发布能力另行验收）。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前代码：`v0.3.0-beta.20`（多工作空间，保留 beta.19 MiniMax 下载能力）。本版通过 Cookie 隔离、空间切换、操作互斥和打包冒烟；不代表各平台重新通过真实账号验收。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+
+## 工作空间（beta.20）
+
+地址栏下方可切换“原有登录态”“自媒体发布”“音乐创作”。它们分别使用独立的持久化 partition，切换保留页面和浏览历史，后台下载不因切换而关闭。
+
+- **升级先使用“原有登录态”**：已有平台会话仍在 `persist:abl-space-default`，没有清理、复制或移动 Cookie。新增两个空间初始为空；如需要在新空间登录，可自行登录或由本人打开“迁移登录态”向导逐域授权。分组名称不限制平台，也不会自动把账号搬过去。
+- 迁移与回滚针对当前空间；启动恢复根据每条 manifest 的 Space 找对应 Cookie store。向导打开时禁止切换，避免迁移目标漂移。
+- 一个 daemon 控制当前可见空间。正在执行或等待节流的请求期间不能切换；其他竞争请求返回 `409 workspace_busy`，不要并发重试。空间切换使旧 Snapshot/visual ref 失效。
+- `browser.status` 返回 `spaceId` 和 `spaces`。HTTP POST 或 WS 请求可带 `spaceId` 防止误操作：与当前空间不一致返回 `409 workspace_changed`。它是目标校验，不是 Agent 切换空间或绕过权限的能力；切换由用户工具栏完成。
+- 此版不提供任意新建空间、多窗口或多 Agent 同时控制不同空间。先实现安全切换与后台下载，不把会话隔离等同于完整的多 Agent 调度。
+
+验收记录：[beta.20 多工作空间](docs/CHANGES-multi-space-beta20.md)。
 
 平台入口由 `src/security/platform-registry.mjs` 统一登记。当前登记小宇宙、喜马拉雅、Suno、微信公众号、微信视频号、抖音、小红书和快手；登记只代表协议层知道投稿入口，不代表 Agent 可以登录、同意协议或执行最终发布。Suno 仅保留适配定义，默认不启用。
 
