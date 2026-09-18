@@ -178,7 +178,9 @@ protocolTest("HTTP, WebSocket and MCP adapters pass against an isolated daemon",
     await client.connect(transport);
     const listed = await client.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
-    assert.equal(names.length, 14);
+    assert.equal(names.length, 16);
+    assert.ok(names.includes("browser_nanojev_decide"));
+    assert.ok(names.includes("browser_nanojev_act"));
     assert.deepEqual(
       names.filter((name) =>
         /publish|submit|delete|pay|evaluate|script|selector/i.test(name),

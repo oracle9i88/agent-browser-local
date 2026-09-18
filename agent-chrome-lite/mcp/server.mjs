@@ -4,6 +4,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
 
+import {
+  buildNanoJevRequest,
+  evaluateNanoJev,
+  extractNanoJevDecision,
+  requiresNanoJevReview,
+} from "../src/nanojev/adapter.mjs";
+
 const baseUrl = process.env.ABL_SERVER_URL || "http://127.0.0.1:3767";
 const token = process.env.ABL_TOKEN;
 
@@ -75,6 +82,104 @@ server.registerTool(
   },
   async () =>
     textResult(await api("/v1/snapshot", { method: "POST", body: "{}" })),
+);
+
+server.registerTool(
+  "browser_nanojev_decide",
+  {
+    description:
+      "Read one fresh contribution-only Snapshot and ask a local NanoJev decision service which current element best advances a goal. Returns a proposal only; it never executes the action. Refs expire after the Snapshot and any later action.",
+    inputSchema: {
+      goal: z.string().min(1).max(2000),
+      questionId: z.string().min(1).max(80).default("action"),
+      confidenceThreshold: z.number().min(0).max(1).default(0.85),
+    },
+  },
+  async ({ goal, questionId, confidenceThreshold }) => {
+    const snapshot = await api("/v1/snapshot", { method: "POST", body: "{}" });
+    const request = buildNanoJevRequest({ goal, snapshot, questionId });
+    const modelPayload = await evaluateNanoJev({ request });
+    const decision = extractNanoJevDecision(modelPayload, {
+      questionId,
+      confidenceThreshold,
+    });
+    decision.requiresReview = requiresNanoJevReview(
+      snapshot.controls.find((control) => control.ref === decision.ref),
+    );
+    return textResult({
+      goal,
+      snapshotId: snapshot.snapshotId,
+      decision,
+      selectedControl: snapshot.controls.find((control) => control.ref === decision.ref) || null,
+      execution: "proposal_only",
+    });
+  },
+);
+
+server.registerTool(
+  "browser_nanojev_act",
+  {
+    description:
+      "Take a fresh Snapshot, ask local NanoJev to choose the target ref, and execute one bounded click, fill, or upload through the daemon. Low-confidence choices return a proposal without execution; publish, delete, payment, auth, and other protected actions remain subject to the daemon handoff policy.",
+    inputSchema: {
+      goal: z.string().min(1).max(2000),
+      operation: z.enum(["click", "fill", "upload"]),
+      value: z.string().max(100_000).optional(),
+      files: z.array(z.string().min(1)).min(1).max(8).optional(),
+      questionId: z.string().min(1).max(80).default("action"),
+      confidenceThreshold: z.number().min(0).max(1).default(0.85),
+    },
+  },
+  async ({ goal, operation, value, files, questionId, confidenceThreshold }) => {
+    if (operation === "fill" && typeof value !== "string") {
+      throw new Error("browser_nanojev_act fill requires value");
+    }
+    if (operation === "upload" && (!Array.isArray(files) || files.length === 0)) {
+      throw new Error("browser_nanojev_act upload requires files");
+    }
+    const snapshot = await api("/v1/snapshot", { method: "POST", body: "{}" });
+    const request = buildNanoJevRequest({ goal, snapshot, questionId });
+    const modelPayload = await evaluateNanoJev({ request });
+    const decision = extractNanoJevDecision(modelPayload, {
+      questionId,
+      confidenceThreshold,
+    });
+    const selectedControl = snapshot.controls.find((control) => control.ref === decision.ref) || null;
+    decision.requiresReview = requiresNanoJevReview(selectedControl);
+    if (!decision.ready || !selectedControl) {
+      return textResult({
+        goal,
+        snapshotId: snapshot.snapshotId,
+        decision,
+        selectedControl,
+        execution: "proposal_only",
+      });
+    }
+
+    const actionPath = {
+      click: "/v1/actions/click",
+      fill: "/v1/actions/fill",
+      upload: "/v1/actions/upload",
+    }[operation];
+    const body = operation === "click"
+      ? { ref: decision.ref }
+      : operation === "fill"
+        ? { ref: decision.ref, value }
+        : { ref: decision.ref, files };
+    const result = await api(actionPath, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return textResult({
+      goal,
+      snapshotId: snapshot.snapshotId,
+      decision,
+      selectedControl,
+      operation,
+      execution: "executed_by_daemon",
+      result,
+    });
+  },
 );
 
 server.registerTool(
