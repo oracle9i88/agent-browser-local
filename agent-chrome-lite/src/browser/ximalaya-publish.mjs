@@ -88,7 +88,10 @@ export function collectUploadFramesInTree(frameTree) {
     if (!node) continue;
     if (node.frame?.url) seen.push(node.frame.url);
     if (isXimalayaUploadFrame(node.frame?.url)) matches.push(node.frame);
-    for (const child of node.childFrames || []) stack.push(child);
+    // Preserve document order while using an explicit stack.
+    for (let index = (node.childFrames || []).length - 1; index >= 0; index -= 1) {
+      stack.push(node.childFrames[index]);
+    }
   }
   return { matches, seen };
 }

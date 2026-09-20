@@ -2,7 +2,7 @@
 
 供 Codex、Claude、NovaGe、NovaDe、Kimi 共用的本地独立 Chromium 浏览器。它以把用户自己的内容送上平台为主；MiniMax 仅额外允许逐首下载用户自己生成的音乐成品，不提供采集、爬取、列表遍历或任意 JavaScript 能力。
 
-当前代码：`v0.3.0-beta.20`（多工作空间，保留 beta.19 MiniMax 下载能力）。本版通过 Cookie 隔离、空间切换、操作互斥和打包冒烟；不代表各平台重新通过真实账号验收。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
+当前代码：`v0.3.0-beta.20-local.1`（多工作空间 + 喜马拉雅真实页同站 iframe 发布修复，保留 beta.19 MiniMax 下载能力）。本版通过 Cookie 隔离、空间切换、操作互斥和喜马拉雅定向回归；不代表其他平台重新通过真实账号验收。已有喜马拉雅上传二阶段表单验收见 `../BROWSER-AGENT-XIMALAYA-VALIDATION-2026-09-06.md`。
 
 ## 工作空间（beta.20）
 
