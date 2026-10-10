@@ -57,6 +57,10 @@ const PLATFORM_REGISTRY = Object.freeze({
       Object.freeze({
         origin: "https://zhuanlan.zhihu.com",
         pathPrefixes: Object.freeze(["/write"]),
+        // Zhihu redirects /write to the draft editor at /p/<id>/edit as soon as
+        // the author types a title; without this template the agent freezes
+        // mid-edit with outside_contribution_scope.
+        pathTemplates: Object.freeze(["/p/:draftId/edit"]),
       }),
     ]),
   }),
