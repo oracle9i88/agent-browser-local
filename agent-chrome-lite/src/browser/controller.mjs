@@ -923,31 +923,40 @@ export class BrowserController extends EventEmitter {
       code: "Backspace",
     });
 
-    for (const character of String(value)) {
-      if (character === "\n") {
-        // A complete Enter event triggers the editor's native paragraph
-        // behavior; the virtual key fields are required by Chromium CDP.
-        await this.cdp.send("Input.dispatchKeyEvent", {
-          type: "keyDown",
-          key: "Enter",
-          code: "Enter",
-          text: "\r",
-          unmodifiedText: "\r",
-          windowsVirtualKeyCode: 13,
-          nativeVirtualKeyCode: 13,
-        });
-        await delay(45 + Math.floor(Math.random() * 55));
-        await this.cdp.send("Input.dispatchKeyEvent", {
-          type: "keyUp",
-          key: "Enter",
-          code: "Enter",
-          windowsVirtualKeyCode: 13,
-          nativeVirtualKeyCode: 13,
-        });
-        continue;
+    // Paragraph-chunked fill: whole paragraphs are inserted atomically and
+    // Enter is given a long settle time. Per-character typing raced rich
+    // editors (Zhihu/Draft.js) that create new blocks asynchronously after
+    // Enter, silently dropping the first character of some paragraphs.
+    const paragraphs = String(value).split("\n");
+    for (let index = 0; index < paragraphs.length; index += 1) {
+      const paragraph = paragraphs[index];
+      if (paragraph.length > 0) {
+        await this.cdp.send("Input.insertText", { text: paragraph });
+        await delay(30 + Math.floor(Math.random() * 40));
       }
-      await this.cdp.send("Input.insertText", { text: character });
-      await delay(18 + Math.floor(Math.random() * 36));
+      if (index === paragraphs.length - 1) break;
+      // A complete Enter event triggers the editor's native paragraph
+      // behavior; the virtual key fields are required by Chromium CDP.
+      await this.cdp.send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Enter",
+        code: "Enter",
+        text: "\r",
+        unmodifiedText: "\r",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+      await delay(45 + Math.floor(Math.random() * 55));
+      await this.cdp.send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Enter",
+        code: "Enter",
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13,
+      });
+      // Wait for the editor to finish creating the new paragraph block
+      // before inserting the next chunk.
+      await delay(140 + Math.floor(Math.random() * 120));
     }
     this.invalidate();
     return { ok: true, length: String(value).length };
