@@ -820,19 +820,19 @@ export class BrowserController extends EventEmitter {
     this.invalidate();
   }
 
-  async fillRef(ref, value) {
+  async fillRef(ref, value, options = {}) {
     const { backendNodeId } = this.resolveRef(ref);
-    return this.fillBackendNode(backendNodeId, value);
+    return this.fillBackendNode(backendNodeId, value, options);
   }
 
-  async fillVisual(backendNodeId, value) {
-    return this.fillBackendNode(backendNodeId, value);
+  async fillVisual(backendNodeId, value, options = {}) {
+    return this.fillBackendNode(backendNodeId, value, options);
   }
 
-  async fillBackendNode(backendNodeId, value) {
+  async fillBackendNode(backendNodeId, value, options = {}) {
     await this.cdp.send("DOM.focus", { backendNodeId });
     await this.clearFieldValue(backendNodeId);
-    return this.fillFocused(value);
+    return this.fillFocused(value, options);
   }
 
   async clearFieldValue(backendNodeId) {
@@ -888,7 +888,7 @@ export class BrowserController extends EventEmitter {
     return { ok: true, length: String(value).length };
   }
 
-  async fillFocused(value) {
+  async fillFocused(value, options = {}) {
     const modifier = process.platform === "darwin" ? 4 : 2;
     await this.cdp.send("Input.dispatchKeyEvent", {
       type: "keyDown",
@@ -927,41 +927,20 @@ export class BrowserController extends EventEmitter {
     // clear; otherwise the first inserted paragraph is silently swallowed.
     await delay(400 + Math.floor(Math.random() * 200));
 
-    // Paragraph-chunked fill: whole paragraphs are inserted atomically and
-    // Enter is given a long settle time. Per-character typing raced rich
-    // editors (Zhihu/Draft.js) that create new blocks asynchronously after
-    // Enter, silently dropping the first character of some paragraphs.
-    const paragraphs = String(value).split("\n");
-    for (let index = 0; index < paragraphs.length; index += 1) {
-      const paragraph = paragraphs[index];
-      if (paragraph.length > 0) {
-        await this.cdp.send("Input.insertText", { text: paragraph });
-        await delay(30 + Math.floor(Math.random() * 40));
-      }
-      if (index === paragraphs.length - 1) break;
-      // A complete Enter event triggers the editor's native paragraph
-      // behavior; the virtual key fields are required by Chromium CDP.
-      await this.cdp.send("Input.dispatchKeyEvent", {
-        type: "keyDown",
-        key: "Enter",
-        code: "Enter",
-        text: "\r",
-        unmodifiedText: "\r",
-        windowsVirtualKeyCode: 13,
-        nativeVirtualKeyCode: 13,
-      });
-      await delay(45 + Math.floor(Math.random() * 55));
-      await this.cdp.send("Input.dispatchKeyEvent", {
-        type: "keyUp",
-        key: "Enter",
-        code: "Enter",
-        windowsVirtualKeyCode: 13,
-        nativeVirtualKeyCode: 13,
-      });
-      // Wait for the editor to finish creating the new paragraph block
-      // before inserting the next chunk.
-      await delay(140 + Math.floor(Math.random() * 120));
-    }
+    // Atomic insert via execCommand. execCommand fires trusted
+    // beforeinput/input events, so rich editors (Zhihu/Draft.js family) run
+    // their own block-splitting logic. Per-character CDP typing raced the
+    // editor's async block creation and silently dropped characters;
+    // Enter-between-chunks lost whole trailing paragraphs. With
+    // options.html, the value is inserted as HTML via insertHTML, which
+    // rich editors (ProseMirror/Substack) route through their paste parser,
+    // producing real headings/bold/blockquotes instead of literal markup.
+    const command = options.html ? "insertHTML" : "insertText";
+    await this.cdp.send("Runtime.evaluate", {
+      expression: `document.execCommand("${command}", false, ${JSON.stringify(String(value))})`,
+      awaitPromise: false,
+    });
+    await delay(150);
     this.invalidate();
     return { ok: true, length: String(value).length };
   }

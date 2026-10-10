@@ -447,7 +447,7 @@ export class BrowserDaemon {
           });
         }
         return this.executor.run(async () => {
-          const result = await this.controller.fillRef(params.ref, params.value);
+          const result = await this.controller.fillRef(params.ref, params.value, { html: params.html === true });
           await this.audit.record({
             event: "browser.fill",
             principal: identity.principal,
@@ -591,7 +591,7 @@ export class BrowserDaemon {
         ]
           .filter(Boolean)
           .join(" ");
-        if (!/upload|上传|导入|选择.{0,8}文件|音频|视频/i.test(label)) {
+        if (!/upload|上传|导入|头像|选择.{0,8}文件|音频|视频/i.test(label)) {
           throw new DaemonError(
             409,
             "invalid_upload_target",
