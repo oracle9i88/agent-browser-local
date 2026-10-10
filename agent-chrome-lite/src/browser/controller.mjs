@@ -923,6 +923,10 @@ export class BrowserController extends EventEmitter {
       code: "Backspace",
     });
 
+    // Let rich editors finish resetting their document model after the
+    // clear; otherwise the first inserted paragraph is silently swallowed.
+    await delay(400 + Math.floor(Math.random() * 200));
+
     // Paragraph-chunked fill: whole paragraphs are inserted atomically and
     // Enter is given a long settle time. Per-character typing raced rich
     // editors (Zhihu/Draft.js) that create new blocks asynchronously after
